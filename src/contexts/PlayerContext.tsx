@@ -206,6 +206,7 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
     setQueueIndex: core.setQueueIndex,
     userQueuedSongIds: core.userQueuedSongIds,
     userQueuedSongIdsRef: core.userQueuedSongIdsRef,
+    autoplaySongIdsRef: core.autoplaySongIdsRef,
     setUserQueuedSongIds: core.setUserQueuedSongIds,
     isShuffled: core.isShuffled,
     isShuffledRef: core.isShuffledRef,
@@ -235,6 +236,7 @@ function PlayerSessionProvider({ children }: { children: ReactNode }) {
   });
 
   useAudioSyncListeners({
+    streamUrlCache: core.streamUrlCache,
     playRequestIdRef: core.playRequestIdRef,
     setPlaybackQuality: core.setPlaybackQuality,
     isPlayerReady: core.isPlayerReady,

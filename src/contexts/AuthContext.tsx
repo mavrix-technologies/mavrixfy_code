@@ -7,11 +7,12 @@ import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 import { clearUserCache } from "@/lib/cache";
 import { resumeDownloadQueue,suspendDownloadQueue } from "@/lib/downloads/downloadQueue";
 import { getDownloadsRootUri } from "@/lib/downloads/filesystem";
-import { auth,db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 import { logger } from "@/lib/logger";
 import { checkRateLimit,clearRateLimit,formatRetryAfter } from "@/lib/rateLimiter";
 import { clearAppStorage } from "@/lib/storage";
 import { emailSchema,loginSchema,registerSchema,safeValidate } from "@/lib/validation";
+import { subscribeToUserProfile,syncUserProfile,toAppUser,type AppUser } from "@/services/auth/userProfile";
 import { deleteAsync } from "expo-file-system/legacy";
 import {
 createUserWithEmailAndPassword,
@@ -20,6 +21,7 @@ EmailAuthProvider,
 signOut as firebaseSignOut,
 User as FirebaseUser,
 GoogleAuthProvider,
+getAdditionalUserInfo,
 OAuthProvider,
 onAuthStateChanged,
 reauthenticateWithCredential,
@@ -30,16 +32,7 @@ signInWithEmailAndPassword,
 signInWithPopup,
 updateProfile,
 } from "firebase/auth";
-import { doc,getDoc,serverTimestamp,setDoc } from "firebase/firestore";
 import React,{ createContext,use,useCallback,useEffect,useMemo,useRef,useState,type ReactNode } from "react";
-
-interface AppUser {
-  id: string;
-  email: string;
-  name: string;
-  picture: string;
-  isAdmin: boolean;
-}
 
 interface AuthContextValue {
   user: AppUser | null;
@@ -75,52 +68,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isGuest, setIsGuest] = useState(false);
   const authGeneration = useRef(0);
 
-  const buildAppUser = useCallback(async (fbUser: FirebaseUser): Promise<AppUser> => {
-    let name = fbUser.displayName || "";
-    let picture = fbUser.photoURL || "";
-
-    try {
-      const userDoc = await getDoc(doc(db, "users", fbUser.uid));
-      if (userDoc.exists()) {
-        const data = userDoc.data();
-        name = data.fullName || data.displayName || name;
-        picture = data.imageUrl || data.photoURL || picture;
-        const isAdmin =
-          data.isAdmin === true ||
-          data.admin === true ||
-          String(data.role || "").toLowerCase() === "admin";
-        return {
-          id: fbUser.uid,
-          email: fbUser.email || "",
-          name,
-          picture,
-          isAdmin,
-        };
-      }
-    } catch {}
-
-    return {
-      id: fbUser.uid,
-      email: fbUser.email || "",
-      name,
-      picture,
-      isAdmin: false,
-    };
-  }, []);
-
   const applyAuthenticatedSnapshot = useCallback((fbUser: FirebaseUser) => {
     // React automatically batches these updates
     // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
     setFirebaseUser(fbUser);
     setIsGuest(false);
     setLoading(false);
-    setUser({
-      id: fbUser.uid,
-      email: fbUser.email || "",
-      name: fbUser.displayName || "",
-      picture: fbUser.photoURL || "",
-      isAdmin: false,
-    });
+    setUser(toAppUser(fbUser));
   }, []);
 
   const applySignedOutSnapshot = useCallback(() => {
@@ -129,6 +83,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsGuest(false);
     setLoading(false);
   }, []);
+
+  // Firestore enriches the authenticated identity; it never blocks login or startup.
+  useEffect(() => {
+    if (!firebaseUser) return;
+    return subscribeToUserProfile(firebaseUser, setUser, (error) => {
+      logger.warn("[AuthContext] Profile synchronization failed:", error);
+    });
+  }, [firebaseUser]);
 
   useEffect(() => {
     let isSubscribed = true;
@@ -163,14 +125,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (fbUser) {
           // react-doctor-disable-next-line react-doctor/no-impure-state-updater -- intentional state update in callback
           applyAuthenticatedSnapshot(fbUser);
-          // Enrich with Firestore data in the background (non-blocking)
-          buildAppUser(fbUser)
-            .then((appUser) => {
-              if (isSubscribed && generation === authGeneration.current && auth.currentUser?.uid === fbUser.uid) {
-                setUser(appUser);
-              }
-            })
-            .catch(() => {});
         } else {
           applySignedOutSnapshot();
         }
@@ -196,7 +150,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(safetyTimeout);
       unsubscribe();
     };
-  }, [applyAuthenticatedSnapshot, applySignedOutSnapshot, buildAppUser]);
+  }, [applyAuthenticatedSnapshot, applySignedOutSnapshot]);
 
   const login = useCallback(async (email: string, password: string) => {
     // Validate input
@@ -208,18 +162,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { email: validEmail, password: validPassword } = validation.data;
 
     // Firebase handles server-side brute-force protection
-    const { cred, appUser } = await signInWithEmailAndPassword(auth, validEmail, validPassword).then(
-      async (userCred) => ({
-        cred: userCred,
-        appUser: await buildAppUser(userCred.user),
-      })
-    );
-    if (auth.currentUser?.uid !== cred.user.uid) return;
-    setUser(appUser);
-    setFirebaseUser(cred.user);
-    setIsGuest(false);
+    await signInWithEmailAndPassword(auth, validEmail, validPassword);
     logLogin("email");
-  }, [buildAppUser]);
+  }, []);
 
   const continueAsGuest = useCallback(() => {
     if (!GUEST_LOGIN_ENABLED) {
@@ -255,232 +200,64 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const normalizedEmail = validEmail;
     const displayName = validFullName;
-    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, validPassword).then(
-      async (userCred) => {
-        await Promise.all([
-          updateProfile(userCred.user, { displayName }),
-          // Create user doc WITHOUT onboardingCompleted — the onboarding flow sets it
-          // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
-          setDoc(doc(db, "users", userCred.user.uid), {
-            email: normalizedEmail,
-            emailLower: normalizedEmail.toLowerCase(),
-            displayName,
-            fullName: displayName,
-            imageUrl: null,
-            photoURL: null,
-            provider: "password",
-            onboardingCompleted: false,
-            schemaVersion: 2,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          }),
-        ]);
-        return userCred;
-      }
-    );
-    const appUser: AppUser = {
-      id: cred.user.uid,
-      email: normalizedEmail,
-      name: displayName,
-      picture: "",
-      isAdmin: false,
-    };
-    if (auth.currentUser?.uid !== cred.user.uid) return;
-    setUser(appUser);
-    setFirebaseUser(cred.user);
-    setIsGuest(false);
+    const cred = await createUserWithEmailAndPassword(auth, normalizedEmail, validPassword);
+    void updateProfile(cred.user, { displayName }).catch((error) => {
+      logger.warn("[AuthContext] Auth display name update failed:", error);
+    });
+    void syncUserProfile(cred.user, { fullName: displayName }).catch((error) => {
+      logger.warn("[AuthContext] New profile synchronization failed:", error);
+    });
     logSignUp("email");
     
     // Clear rate limit on successful registration
-    await clearRateLimit('auth:register', emailLower);
+    void clearRateLimit('auth:register', emailLower).catch(() => {});
   }, []);
 
   const signInWithGoogle = useCallback(async () => {
-    if (IS_WEB) {
-      const provider = new GoogleAuthProvider();
-      const result = await signInWithPopup(auth, provider);
-      const fbUser = result.user;
-      const userDocRef = doc(db, "users", fbUser.uid);
-      const userDocSnap = await getDoc(userDocRef);
-      const googleUserData = {
-        email: fbUser.email || "",
-        emailLower: (fbUser.email || "").toLowerCase(),
-        displayName: fbUser.displayName || "",
-        fullName: fbUser.displayName || "",
-        imageUrl: fbUser.photoURL || null,
-        photoURL: fbUser.photoURL || null,
-        provider: "google.com",
-        schemaVersion: 2,
-        updatedAt: serverTimestamp(),
-        lastLoginAt: serverTimestamp(),
-      };
-      if (!userDocSnap.exists()) {
-        // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
-        await setDoc(userDocRef, {
-          ...googleUserData,
-          createdAt: serverTimestamp(),
-        });
-        logSignUp("google");
-      } else {
-        // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
-        await setDoc(userDocRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
-        logLogin("google");
-      }
-      const appUser = await buildAppUser(fbUser);
-      if (auth.currentUser?.uid !== fbUser.uid) return;
-      setUser(appUser);
-      setFirebaseUser(fbUser);
-      setIsGuest(false);
-      return;
-    }
-
-    throw new Error("Google Sign-In on native should use the native Google flow.");
-  }, [buildAppUser]);
+    if (!IS_WEB) throw new Error("Google Sign-In on native should use the native Google flow.");
+    const result = await signInWithPopup(auth, new GoogleAuthProvider());
+    if (getAdditionalUserInfo(result)?.isNewUser) logSignUp("google");
+    else logLogin("google");
+  }, []);
 
   const signInWithGoogleCredential = useCallback(async (idToken: string) => {
-    const credential = GoogleAuthProvider.credential(idToken);
-    const result = await signInWithCredential(auth, credential);
-    const fbUser = result.user;
-    const userDocRef = doc(db, "users", fbUser.uid);
-    const userDocSnap = await getDoc(userDocRef);
-    const googleUserData = {
-      email: fbUser.email || "",
-      emailLower: (fbUser.email || "").toLowerCase(),
-      displayName: fbUser.displayName || "",
-      fullName: fbUser.displayName || "",
-      imageUrl: fbUser.photoURL || null,
-      photoURL: fbUser.photoURL || null,
-      provider: "google.com",
-      schemaVersion: 2,
-      updatedAt: serverTimestamp(),
-      lastLoginAt: serverTimestamp(),
-    };
-    if (!userDocSnap.exists()) {
-      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
-      await setDoc(userDocRef, {
-        ...googleUserData,
-        createdAt: serverTimestamp(),
-      });
-      logSignUp("google");
-    } else {
-      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
-      await setDoc(userDocRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
-      logLogin("google");
-    }
-    const appUser = await buildAppUser(fbUser);
-    if (auth.currentUser?.uid !== fbUser.uid) return;
-    setUser(appUser);
-    setFirebaseUser(fbUser);
-    setIsGuest(false);
-  }, [buildAppUser]);
+    const result = await signInWithCredential(auth, GoogleAuthProvider.credential(idToken));
+    if (getAdditionalUserInfo(result)?.isNewUser) logSignUp("google");
+    else logLogin("google");
+  }, []);
 
   const signInWithApple = useCallback(async () => {
-    if (!IS_WEB) {
-      throw new Error("Apple Sign-In on native should use the Apple device sign-in flow.");
-    }
-
+    if (!IS_WEB) throw new Error("Apple Sign-In on native should use the Apple device sign-in flow.");
     const provider = new OAuthProvider("apple.com");
     provider.addScope("email");
     provider.addScope("name");
-
     const result = await signInWithPopup(auth, provider);
-    const fbUser = result.user;
-    const userDocRef = doc(db, "users", fbUser.uid);
-    const userDocSnap = await getDoc(userDocRef);
-    const displayName = fbUser.displayName || "";
-    const email = fbUser.email || "";
-    const appleUserData = {
-      email,
-      emailLower: email.toLowerCase(),
-      displayName,
-      fullName: displayName,
-      imageUrl: fbUser.photoURL || null,
-      photoURL: fbUser.photoURL || null,
-      provider: "apple.com",
-      schemaVersion: 2,
-      updatedAt: serverTimestamp(),
-      lastLoginAt: serverTimestamp(),
-    };
-
-    if (!userDocSnap.exists()) {
-      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
-      await setDoc(userDocRef, {
-        ...appleUserData,
-        onboardingCompleted: false,
-        createdAt: serverTimestamp(),
-      });
-      logSignUp("apple");
-    } else {
-      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
-      await setDoc(userDocRef, { lastLoginAt: serverTimestamp(), updatedAt: serverTimestamp() }, { merge: true });
-      logLogin("apple");
-    }
-
-    const appUser = await buildAppUser(fbUser);
-    if (auth.currentUser?.uid !== fbUser.uid) return;
-    setUser(appUser);
-    setFirebaseUser(fbUser);
-    setIsGuest(false);
-  }, [buildAppUser]);
+    if (getAdditionalUserInfo(result)?.isNewUser) logSignUp("apple");
+    else logLogin("apple");
+  }, []);
 
   const signInWithAppleCredential = useCallback(async (appleCredential: AppleMobileCredential) => {
     const provider = new OAuthProvider("apple.com");
-    const credential = provider.credential({
+    const result = await signInWithCredential(auth, provider.credential({
       idToken: appleCredential.idToken,
       rawNonce: appleCredential.rawNonce,
-    });
-    const result = await signInWithCredential(auth, credential);
-    const fbUser = result.user;
-    const userDocRef = doc(db, "users", fbUser.uid);
-    const userDocSnap = await getDoc(userDocRef);
-    const displayName = appleCredential.fullName?.trim() || fbUser.displayName || "";
-    const email = fbUser.email || appleCredential.email || "";
-
-    if (displayName && !fbUser.displayName) {
-      await updateProfile(fbUser, { displayName }).catch(() => {});
-    }
-
-    const appleUserData = {
-      email,
-      emailLower: email.toLowerCase(),
-      imageUrl: fbUser.photoURL || null,
-      photoURL: fbUser.photoURL || null,
-      provider: "apple.com",
-      appleUserId: appleCredential.user || null,
-      schemaVersion: 2,
-      updatedAt: serverTimestamp(),
-      lastLoginAt: serverTimestamp(),
-    };
-    const appleNameData = displayName
-      ? { displayName, fullName: displayName }
-      : {};
-
-    if (!userDocSnap.exists()) {
-      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules binds users/{uid} to request.auth.uid and blocks client-owned admin/role fields.
-      await setDoc(userDocRef, {
-        ...appleUserData,
-        displayName,
-        fullName: displayName,
-        onboardingCompleted: false,
-        createdAt: serverTimestamp(),
+    }));
+    const displayName = appleCredential.fullName?.trim() || result.user.displayName || "";
+    if (displayName && !result.user.displayName) {
+      void updateProfile(result.user, { displayName }).catch((error) => {
+        logger.warn("[AuthContext] Apple display name update failed:", error);
       });
-      logSignUp("apple");
-    } else {
-      // react-doctor-disable-next-line react-doctor/firebase-client-owned-authz-field -- firestore.rules keeps auth/authorization fields immutable for user profile updates.
-      await setDoc(userDocRef, {
-        lastLoginAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        ...(!userDocSnap.data()?.fullName ? appleNameData : {}),
-      }, { merge: true });
-      logLogin("apple");
     }
-
-    const appUser = await buildAppUser(fbUser);
-    if (auth.currentUser?.uid !== fbUser.uid) return;
-    setUser(appUser);
-    setFirebaseUser(fbUser);
-    setIsGuest(false);
-  }, [buildAppUser]);
+    void syncUserProfile(result.user, {
+      fullName: displayName,
+      email: appleCredential.email || undefined,
+      appleUserId: appleCredential.user || undefined,
+    }).catch((error) => {
+      logger.warn("[AuthContext] Apple profile synchronization failed:", error);
+    });
+    if (getAdditionalUserInfo(result)?.isNewUser) logSignUp("apple");
+    else logLogin("apple");
+  }, []);
 
   const resetPassword = useCallback(async (email: string) => {
     // Rate limit check
@@ -593,12 +370,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [firebaseUser?.uid, user?.id]);
 
   const refreshUser = useCallback(async () => {
-    if (auth.currentUser) {
-      const generation = authGeneration.current;
-      const appUser = await buildAppUser(auth.currentUser);
-      if (generation === authGeneration.current && auth.currentUser?.uid === appUser.id) setUser(appUser);
-    }
-  }, [buildAppUser]);
+    const currentUser = auth.currentUser;
+    if (!currentUser) return;
+    // The live listener applies the result; a pending server write must not lock the caller.
+    void syncUserProfile(currentUser).catch((error) => {
+      logger.warn("[AuthContext] Profile refresh failed:", error);
+    });
+  }, []);
 
   const value = useMemo(() => ({
     user,

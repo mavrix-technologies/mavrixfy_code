@@ -7,7 +7,7 @@ import { HomeHorizontalSection, type HomeCardItem } from "./HomeHorizontalSectio
 import { homeDisplayText } from "./homeDisplayText";
 import { HomeSectionSkeleton } from "./HomeSkeletons";
 
-export const HomeYouTubeContent = memo(function HomeYouTubeContent({ section }: { section: YouTubeHomeSection }) {
+export const HomeYouTubeContent = memo(function HomeYouTubeContent({ section, updatedAt }: { section: YouTubeHomeSection; updatedAt?: number }) {
   const { playSong } = usePlayerRowActions();
   const songs = useMemo<HomeCardItem[]>(() => section.songs.map(song => ({
     id: song.id, name: song.title, imageUrl: song.coverUrl, subtitle: homeDisplayText(song.artist, "Artist"), type: "song", source: "youtube",
@@ -27,10 +27,13 @@ export const HomeYouTubeContent = memo(function HomeYouTubeContent({ section }: 
     const song = section.songs.find(song => song.id === item.id);
     if (song) void playSong(song, section.songs);
   }, [section.songs, playSong]);
-  if (section.category === "new-releases") return <HomeHorizontalSection title="New Releases" items={releaseItems} onSongPress={handleSong} />;
+  const caption = section.id === "youtube-for-you" ? "Based on your recent listening" : updatedAt
+    ? `Updated ${new Date(updatedAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}`
+    : undefined;
+  if (section.category === "new-releases") return <HomeHorizontalSection title="New Releases" caption={caption} items={releaseItems} onSongPress={handleSong} />;
   return <View>
-    <HomeHorizontalSection title={homeDisplayText(section.title)} items={songs} onItemPress={handleSong} />
-    <HomeHorizontalSection title={songs.length ? `${homeDisplayText(section.title)} · Playlists` : homeDisplayText(section.title)} items={playlists} />
+    <HomeHorizontalSection title={homeDisplayText(section.title)} caption={caption} items={songs} onItemPress={handleSong} />
+    <HomeHorizontalSection title={songs.length ? `${homeDisplayText(section.title)} · Playlists` : homeDisplayText(section.title)} caption={songs.length ? undefined : caption} items={playlists} />
   </View>;
 });
 

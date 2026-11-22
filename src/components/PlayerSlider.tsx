@@ -67,13 +67,13 @@ export const PlayerSlider = memo(function PlayerSlider({
   const lastProgressUpdateRef = useRef(0);
 
   useEffect(() => {
-    scheduleOnUI((next: number) => {
+    scheduleOnUI((next: number, buffering: boolean) => {
       "worklet";
       if (isSlidingShared.value === 0) {
-        visualProgress.value = withTiming(next, { duration: 500, easing: Easing.linear });
+        visualProgress.value = buffering ? next : withTiming(next, { duration: 500, easing: Easing.linear });
       }
-    }, normalizedValue);
-  }, [isSlidingShared, normalizedValue, visualProgress]);
+    }, normalizedValue, isBuffering);
+  }, [isBuffering, isSlidingShared, normalizedValue, visualProgress]);
 
   useEffect(() => {
     bufferedProgress.value = withTiming(normalizedBuffer, { duration: 500, easing: Easing.linear });

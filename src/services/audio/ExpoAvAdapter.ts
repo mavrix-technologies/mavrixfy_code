@@ -116,7 +116,7 @@ function attachListener(p: AudioPlayer, gen: number, shouldPlay: () => boolean):
     if (gen !== generation || activePlayer !== p || finishedPlayers.has(p)) return;
     const duration = playbackDuration(status.duration ?? 0, resolvedDurations.get(p)) || lastDuration;
     if (duration > 0) lastDuration = duration;
-    const reportedPosition = Number.isFinite(status.currentTime) ? Math.max(0, status.currentTime) : 0;
+    const reportedPosition = Number.isFinite(status.currentTime) ? Math.max(0, status.currentTime) : lastPosition;
     const terminalPosition = Math.max(reportedPosition, Number.isFinite(p.currentTime) ? p.currentTime : 0, lastPosition);
     if (status.playing) hasPlayed = true;
     // Some Expo iOS EOF updates contain only stopped playback, after AVQueuePlayer

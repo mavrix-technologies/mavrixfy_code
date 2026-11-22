@@ -10,6 +10,26 @@ function load(path, imports = {}) {
  return module.exports;
 }
 const empty = {songs:[],artists:[],albums:[],playlists:[]};
+test('clearing recents follows pending writes and stays within the selected account', async () => {
+ let account = 'a';
+ const disk = new Map();
+ const storage = load('src/lib/storage.ts', {
+  '@/services/audio/equalizerConfig': { FLAT_EQUALIZER: {} },
+  '@/lib/logger': { logger: { error() {} } },
+  '@/lib/smartAutoplayConfig': {},
+  '@/utils/idleTask': {}, react: {}, 'react-native': {},
+  './accountScope': { accountStorageKey: key => account + key, getAccountScope: () => ({ accountId: account }) },
+  '@react-native-async-storage/async-storage': { getItem: async key => disk.get(key) ?? null, setItem: async (key, value) => disk.set(key, value) },
+ });
+ const old = storage.addSearchHistoryItem('Old search');
+ const clear = storage.clearSearchHistory();
+ account = 'b';
+ await storage.addSearchHistoryItem('Other account');
+ await Promise.all([old, clear]);
+ assert.equal((await storage.getSearchHistory())[0].label, 'Other account');
+ account = 'a';
+ assert.equal((await storage.getSearchHistory()).length, 0);
+});
 test('search reducer starts with songs, clears stale rows while typing and keeps the selected tab on clear', () => {
  const f = load('src/features/search/hooks/searchEngineReducer.ts', {'@/lib/searchRepository':{EMPTY_RESULTS:empty}});
  let state = f.createInitialSearchState(''); assert.equal(state.resultFilter,'songs');
@@ -97,4 +117,17 @@ test('submit searches immediately and a late autocomplete response cannot reopen
  f.suggestions[0].resolve(['chaleya song']);await f.settle();
  assert.equal(f.render().suggestionsOpen,false);f.advance(400);assert.equal(f.requests.length,1);
  f.requests[0].resolve({...empty,songs:[{id:'played'}]});assert.equal((await f.settle()).songResults[0].id,'played');
+});
+
+test('a matching catalog entity leads suggestions even if autocomplete returns no queries', async () => {
+ const f = engineFixture();
+ f.render().handleChangeText('chaleya'); f.render(); f.advance(400);
+ f.suggestions[0].resolve([]);
+ f.requests[0].resolve({ ...empty, songs: [{ id: 'track', title: 'Chaleya' }] });
+ const result = await f.settle();
+ assert.equal(result.suggestionsOpen, true);
+ assert.equal(result.suggestionRows[0].kind, 'song');
+ assert.equal(result.suggestionRows[0].song.id, 'track');
+ result.handleChangeText('other'); f.render();
+ assert.equal(f.render().suggestionRows.length, 0);
 });

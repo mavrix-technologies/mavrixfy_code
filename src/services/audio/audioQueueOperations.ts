@@ -22,6 +22,7 @@ interface UseAudioQueueOperationsOptions {
   setQueueIndex: (index: number) => void;
   userQueuedSongIds: string[];
   userQueuedSongIdsRef: MutableRefObject<string[]>;
+  autoplaySongIdsRef: MutableRefObject<string[]>;
   setUserQueuedSongIds: React.Dispatch<React.SetStateAction<string[]>>;
   isShuffled: boolean;
   isShuffledRef: MutableRefObject<boolean>;
@@ -56,6 +57,7 @@ export function useAudioQueueOperations({
   queueIndexRef,
   setQueueIndex,
   userQueuedSongIdsRef,
+  autoplaySongIdsRef,
   setUserQueuedSongIds,
   isShuffledRef,
   setIsShuffled,
@@ -230,11 +232,19 @@ export function useAudioQueueOperations({
 
         const previousQueue = queueRef.current;
         const songWithUrl = resolvedUrl ? withResolvedPlaybackUrl(song, resolvedUrl) : song;
-        const nextQueue = [...previousQueue, songWithUrl];
+        const activeIndex = queueIndexRef.current;
+        const isAutoplay = (item: Song) => autoplaySongIdsRef.current.includes(item.id) &&
+          !userQueuedSongIdsRef.current.includes(item.id);
+        const firstAutoplay = previousQueue.findIndex((item, index) => index > activeIndex && isAutoplay(item));
+        const insertAt = firstAutoplay < 0 ? previousQueue.length : firstAutoplay;
+        const nextQueue = [...previousQueue];
+        nextQueue.splice(insertAt, 0, songWithUrl);
         queueRef.current = nextQueue;
         setQueue(nextQueue);
 
-        const nextSourceQueue = [...originalQueueRef.current, songWithUrl];
+        const nextSourceQueue = [...originalQueueRef.current];
+        const sourceAnchor = firstAutoplay < 0 ? -1 : nextSourceQueue.indexOf(previousQueue[firstAutoplay]);
+        nextSourceQueue.splice(sourceAnchor < 0 ? nextSourceQueue.length : sourceAnchor, 0, songWithUrl);
         originalQueueRef.current = nextSourceQueue;
         setSourceQueue(nextSourceQueue);
 
@@ -254,7 +264,7 @@ export function useAudioQueueOperations({
           try {
             const nativeQueue = await TrackPlayer!.getQueue();
             if (nativeQueueIdsMatch(nativeQueue, previousQueue)) {
-              await TrackPlayer!.add([songToTrack(songWithUrl, resolvedUrl, streamUrlCache.current)]);
+              await TrackPlayer!.add([songToTrack(songWithUrl, resolvedUrl, streamUrlCache.current)], insertAt);
             } else {
               await replaceNativeQueuePreservingState(
                 nextQueue,
@@ -284,6 +294,7 @@ export function useAudioQueueOperations({
       setSourceQueue,
       setUserQueuedSongIds,
       userQueuedSongIdsRef,
+      autoplaySongIdsRef,
       TrackPlayer,
       streamUrlCache,
       queueIndexRef,

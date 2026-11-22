@@ -30,17 +30,10 @@ export function isKnownNonAudioPageUrl(value: string): boolean {
     const host = parsed.hostname.toLowerCase();
     const path = parsed.pathname.toLowerCase();
 
-    if (/\.(?:mp3|m4a|mp4|aac|opus|ogg|wav|flac|m3u8)(?:$|[?#])/i.test(path)) return false;
-    if (
-      host.includes("saavncdn.com") ||
-      host.includes("gaanacdn.com") ||
-      host.includes("akamaized.net") ||
-      host.includes("googlevideo.com")
-    )
-      return false;
-    if (host === "gaana.com" || host === "www.gaana.com" || host === "jiosaavn.com" || host === "www.jiosaavn.com") return true;
-    if (host.includes("youtube.com") || host.includes("youtu.be")) return true;
-    if (host.includes("spotify.com") || host.includes("music.apple.com")) return true;
+    const isDomain = (domain: string) => host === domain || host.endsWith(`.${domain}`);
+    // A provider page cannot become audio merely by ending in .mp3.
+    if (["gaana.com", "jiosaavn.com", "youtube.com", "youtu.be", "spotify.com", "music.apple.com"].some(isDomain)) return true;
+    if (/\.(?:html?|json|xml)$/.test(path)) return true;
   } catch {
     return false;
   }
@@ -50,8 +43,18 @@ export function isKnownNonAudioPageUrl(value: string): boolean {
 
 export function readAudioCandidate(value: unknown): string {
   const url = readNonEmptyString(value);
-  if (!url || isKnownNonAudioPageUrl(url)) return "";
-  return url;
+  if (!url || /[\u0000-\u001f\u007f]/.test(url)) return "";
+  if (url.startsWith("/") && !url.startsWith("//")) return url;
+  try {
+    const parsed = new URL(url);
+    if (!["https:", "http:", "file:", "content:"].includes(parsed.protocol)) return "";
+    if (parsed.username || parsed.password) return "";
+    if ((parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      (/\s/.test(url) || !parsed.hostname || isKnownNonAudioPageUrl(url))) return "";
+    return url; // Preserve the provider's signed query and escaping exactly.
+  } catch {
+    return "";
+  }
 }
 
 export function readDownloadAudioUrl(value: unknown): string {
@@ -184,7 +187,7 @@ export async function getRequestedQualityPreference(): Promise<{
     if (requested === "auto") {
       effective = await detectAutoStreamingQuality(unlocked);
     } else if (requested === "high") {
-      effective = "high";
+      effective = unlocked ? "high" : "medium";
     } else {
       effective = requested;
     }
@@ -267,8 +270,10 @@ export async function resolvePlaybackUrlWithDetails(
   if (isYouTubeSong(song)) {
     if (forcedQuality) invalidateYouTubeStream(song);
     const stream = await resolveYouTubeStream(song, targetQuality, targetQuality !== "low" && preferJioSaavn);
+    const playableUrl = readAudioCandidate(stream.url);
+    if (!playableUrl || isAudioPreviewUrl(playableUrl)) throw new Error("The music provider returned an invalid audio source.");
     const bitrate = Number.isFinite(stream.bitrate) && stream.bitrate > 0 ? Math.round(stream.bitrate / 1000) : 0;
-    return { url: stream.url, qualityState: { requested: effectiveRequested,
+    return { url: playableUrl, qualityState: { requested: effectiveRequested,
       actualBitrate: bitrate, codec: stream.codec, qualityLabel: `${bitrate > 0 ? `${bitrate}kbps` : "Original audio"}${stream.codec ? ` · ${stream.codec}` : ""}`,
       unlocked, isFallback: false } };
   }
@@ -278,9 +283,10 @@ export async function resolvePlaybackUrlWithDetails(
     try {
       const { resolveFullSongAudio } = await import("@/services/spotify/SpotifyCatalogService");
       const resolved = await resolveFullSongAudio(song);
-      if (resolved?.url && !isAudioPreviewUrl(resolved.url)) {
+      const playableUrl = readAudioCandidate(resolved?.url);
+      if (resolved && playableUrl && !isAudioPreviewUrl(playableUrl)) {
         return {
-          url: resolved.url,
+          url: playableUrl,
           qualityState: {
             requested: effectiveRequested,
             actualBitrate: resolved.bitrate,
@@ -346,9 +352,10 @@ export async function resolvePlaybackUrlWithDetails(
   try {
     const { resolveFullSongAudio } = await import("@/services/spotify/SpotifyCatalogService");
     const resolved = await resolveFullSongAudio(song);
-    if (resolved?.url && !isAudioPreviewUrl(resolved.url)) {
+    const playableUrl = readAudioCandidate(resolved?.url);
+    if (resolved && playableUrl && !isAudioPreviewUrl(playableUrl)) {
       return {
-        url: resolved.url,
+        url: playableUrl,
         qualityState: {
           requested: effectiveRequested,
           actualBitrate: resolved.bitrate,

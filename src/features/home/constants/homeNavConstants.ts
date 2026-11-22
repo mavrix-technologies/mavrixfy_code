@@ -17,10 +17,11 @@ export const MAVRIXFY_MUSIC_CATEGORIES: readonly MusicCategoryItem[] = [
   { id: "Playlists", label: "Playlists", focusedIcon: "list", unfocusedIcon: "list-outline" },
   { id: "Albums", label: "Albums", focusedIcon: "disc", unfocusedIcon: "disc-outline" },
   { id: "New Releases", label: "New Releases", focusedIcon: "sparkles", unfocusedIcon: "sparkles-outline" },
+  { id: "Trending", label: "Trending", focusedIcon: "trending-up", unfocusedIcon: "trending-up-outline" },
   { id: "Recently Played", label: "Recent", focusedIcon: "time", unfocusedIcon: "time-outline" },
 ] as const;
 
-export type MavrixfyCategory = "All" | "Spotify" | "Songs" | "Playlists" | "Albums" | "New Releases" | "Recently Played";
+export type MavrixfyCategory = "All" | "Spotify" | "Songs" | "Playlists" | "Albums" | "New Releases" | "Trending" | "Recently Played";
 
 export const UNIFIED_HEADER_TOP_BAR_HEIGHT = 48;
 export const UNIFIED_HEADER_MENU_HEIGHT = 58;

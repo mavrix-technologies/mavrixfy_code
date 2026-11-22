@@ -29,7 +29,7 @@ SearchBrowseSection,
 SearchRecentSection,
 } from "../components/SearchBrowseSection";
 import { SearchResultsSection } from "../components/SearchResultsSection";
-import { useSearchEngine } from "../hooks/useSearchEngine";
+import { useSearchEngine, type SearchSuggestionRow } from "../hooks/useSearchEngine";
 import { styles } from "../styles/searchStyles";
 
 if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -78,6 +78,7 @@ function SearchScreenView() {
     handleRecentSearchPress,
     handleSuggestionPress,
     handleRemoveRecentSearch,
+    handleClearRecentSearches,
     handleResultFilterSelect,
     handleSongResultPress,
     handleArtistPress,
@@ -97,21 +98,32 @@ function SearchScreenView() {
     handleCancelSearchMode();
   }, [handleCancelSearchMode]);
 
-  const renderSuggestion = useCallback(({ item }: { item: { label: string; isHistory: boolean } }) => {
+  const renderSuggestion = useCallback(({ item }: { item: SearchSuggestionRow }) => {
     const index = item.label.toLowerCase().indexOf(query.trim().toLowerCase());
     const length = query.trim().length;
+    const onPress = () => {
+      if (item.kind === "query") return handleSuggestionPress(item.label);
+      Keyboard.dismiss();
+      if (item.kind === "song") return handleSongResultPress(item.song);
+      if (item.kind === "artist") return handleArtistPress(item.artist);
+      if (item.kind === "album") return handleAlbumPress(item.album, item.album.artist || "");
+      handlePlaylistPress(item.playlist, "");
+    };
+    const icon = { query: item.isHistory ? "time-outline" : "search-outline", song: "musical-note-outline",
+      artist: "person-outline", album: "disc-outline", playlist: "list-outline" } as const;
     return (
-      <Pressable style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]} onPress={() => handleSuggestionPress(item.label)}>
-        <Ionicons name={item.isHistory ? "time-outline" : "search-outline"} size={18} color={Colors.subtext} style={styles.suggestionIcon} />
+      <Pressable accessibilityRole="button" accessibilityLabel={item.kind === "query" ? item.label : `${item.label}, ${item.kind}`}
+        style={({ pressed }) => [styles.suggestionRow, pressed && styles.suggestionRowPressed]} onPress={onPress}>
+        <Ionicons name={icon[item.kind]} size={18} color={Colors.subtext} style={styles.suggestionIcon} />
         <Text style={styles.suggestionText} numberOfLines={1}>
           {index < 0 ? item.label : <>{item.label.slice(0, index)}<Text style={{ fontFamily: "Inter_700Bold" }}>{item.label.slice(index, index + length)}</Text>{item.label.slice(index + length)}</>}
         </Text>
-        <Pressable style={styles.suggestionInsertButton} accessibilityLabel={`Insert ${item.label}`} onPress={event => { event.stopPropagation(); handleChangeText(item.label); inputRef.current?.focus(); }}>
+        {item.kind === "query" && <Pressable style={styles.suggestionInsertButton} accessibilityLabel={`Insert ${item.label}`} onPress={event => { event.stopPropagation(); handleChangeText(item.label); inputRef.current?.focus(); }}>
           <Ionicons name="arrow-up-outline" size={20} color={Colors.subtext} style={{ transform: [{ rotate: "-45deg" }] }} />
-        </Pressable>
+        </Pressable>}
       </Pressable>
     );
-  }, [query, handleSuggestionPress, handleChangeText]);
+  }, [query, handleSuggestionPress, handleChangeText, handleSongResultPress, handleArtistPress, handleAlbumPress, handlePlaylistPress]);
 
 
   // Early return for offline idle state
@@ -216,7 +228,7 @@ function SearchScreenView() {
       {isSearchMode && suggestionsOpen && suggestionRows.length > 0 && query.trim() ? (
         <View style={styles.resultsWrap}>
           <FlatList data={suggestionRows} automaticallyAdjustKeyboardInsets keyboardDismissMode="none" keyboardShouldPersistTaps="always"
-            keyExtractor={item => `${item.isHistory ? "history" : "suggestion"}:${item.label}`}
+            keyExtractor={item => `${item.kind}:${item.label}`}
             renderItem={renderSuggestion} contentContainerStyle={{ paddingBottom: 146 }} initialNumToRender={10} />
         </View>
       ) : showFocusedRecentSearches ? (
@@ -227,6 +239,7 @@ function SearchScreenView() {
           onScroll={handleHeaderScroll}
           onRecentSearchPress={handleRecentSearchPress}
           onRemoveRecentSearch={handleRemoveRecentSearch}
+          onClearRecentSearches={handleClearRecentSearches}
         />
       ) : showBrowse ? (
         <SearchBrowseSection

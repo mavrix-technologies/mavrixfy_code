@@ -82,6 +82,7 @@ const HorizontalCard = memo(function HorizontalCard({
 
 export const HomeHorizontalSection = memo(function HomeHorizontalSection({
   title,
+  caption,
   items,
   isAlbum = false,
   isFirestore = false,
@@ -89,6 +90,7 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
   onSongPress,
 }: {
   title: string;
+  caption?: string;
   items: HomeCardItem[];
   isAlbum?: boolean;
   isFirestore?: boolean;
@@ -151,6 +153,7 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>{homeDisplayText(title)}</Text>
+        {caption && <Text style={styles.cardSubtitle}>{caption}</Text>}
       </View>
 
       <FlatList

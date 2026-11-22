@@ -98,6 +98,17 @@ const HomeFeedSectionRow = React.memo(function HomeFeedSectionRow({
   featuredArtists,
 }: HomeFeedItemProps) {
   switch (item.type) {
+    case "trending-status":
+      return (
+        <HomeYouTubeStatus
+          hasFeed={Boolean(explore.data || youtube.data)}
+          loading={explore.isFetching || youtube.isFetching || (explore.isPending && isOnline)}
+          failed={explore.isError || youtube.isError}
+          online={isOnline}
+          onRetry={() => { retryExplore(); retryYouTube(); }}
+          emptyMessage="No charts available right now. Pull to refresh."
+        />
+      );
     case "releases-status":
       return (
         <HomeYouTubeStatus
@@ -119,8 +130,16 @@ const HomeFeedSectionRow = React.memo(function HomeFeedSectionRow({
         <HomeQuickPicksSkeleton />
       ) : null;
     }
-    case "youtube-section":
-      return <HomeYouTubeContent section={item.section} />;
+    case "youtube-section": {
+      const category = item.section.category;
+      const regional = category === "new-releases"
+        ? explore.data?.sections?.some((section: { category?: string }) => section.category === "new-releases")
+        : item.section.id.startsWith("youtube-regional-");
+      const updatedAt = category === "new-releases" || category === "trending"
+        ? (regional ? explore.dataUpdatedAt : youtube.dataUpdatedAt)
+        : undefined;
+      return <HomeYouTubeContent section={item.section} updatedAt={updatedAt} />;
+    }
     case "youtube-status":
       return (
         <HomeYouTubeStatus

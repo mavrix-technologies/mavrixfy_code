@@ -89,6 +89,7 @@ export function usePlayerCoreState({
   const playSongRef = useRef<(song: Song, queue?: Song[]) => Promise<void> | void>(() => {});
 
   const streamUrlCache = useRef<Map<string, string>>(new Map());
+  const streamCacheDeadlines = useRef<Map<string, number>>(new Map());
   const streamResolveCache = useRef<Map<string, Promise<string | null>>>(new Map());
   const MAX_STREAM_CACHE = 100;
 
@@ -136,13 +137,28 @@ export function usePlayerCoreState({
   const setStreamCache = useCallback((songId: string, url: string) => {
     if (!songId || !url) return;
     const cache = streamUrlCache.current;
+    if (cache.size === 0) streamCacheDeadlines.current.clear();
     if (cache.has(songId)) {
       cache.delete(songId);
     } else if (cache.size >= MAX_STREAM_CACHE) {
       const oldestKey = cache.keys().next().value;
-      if (oldestKey) cache.delete(oldestKey);
+      if (oldestKey) {
+        cache.delete(oldestKey);
+        streamCacheDeadlines.current.delete(oldestKey);
+      }
+    }
+    // Non-YouTube songs can resolve to signed media URLs too (e.g. Spotify
+    // matches). Never keep those indefinitely under the catalog song ID.
+    const now = Date.now();
+    const explicitExpiry = /[?&]expire=(\d+)(?:&|$)/.exec(url);
+    const deadline = Math.min(now + 5 * 60_000,
+      explicitExpiry ? Number(explicitExpiry[1]) * 1000 - 120_000 : Infinity);
+    if (deadline <= now) {
+      streamCacheDeadlines.current.delete(songId);
+      return;
     }
     cache.set(songId, url);
+    streamCacheDeadlines.current.set(songId, deadline);
   }, []);
 
   const resolvePlaybackUrlCached = useCallback(
@@ -156,8 +172,11 @@ export function usePlayerCoreState({
       const cached = streamUrlCache.current.get(song.id);
       // Files and download licenses can change while the app remains open.
       // Re-enter the resolver's download/file validation on every selection.
-      if (cached && /^(?:file|content):\/\/|^\//i.test(cached)) streamUrlCache.current.delete(song.id);
-      else if (cached && !forcedQuality) return cached;
+      if (cached && (/^(?:file|content):\/\/|^\//i.test(cached) ||
+        (streamCacheDeadlines.current.get(song.id) ?? 0) <= Date.now())) {
+        streamUrlCache.current.delete(song.id);
+        streamCacheDeadlines.current.delete(song.id);
+      } else if (cached && !forcedQuality) return cached;
 
       const pending = streamResolveCache.current.get(song.id);
       if (pending && !forcedQuality) return pending;
@@ -252,14 +271,18 @@ export function usePlayerCoreState({
 
   const triggerAutoplayAppend = useCallback(
     async (seedSong: Song, currentQueue: Song[], shouldAppend: () => boolean = () => true): Promise<Song[]> => {
-      if (!shouldAppend() || !seedSong?.id || autoplayInFlightRef.current) return [];
+      if (!shouldAppend() || repeatModeRef.current !== "off" || !seedSong?.id || autoplayInFlightRef.current) return [];
       if (lastAutoplaySeedIdRef.current === seedSong.id) return [];
       autoplayInFlightRef.current = true;
       const sourceQueue = originalQueueRef.current;
       const scope = getAccountScope();
+      const selection = playRequestIdRef.current;
+      const selectedId = currentSongRef.current?.id;
+      const stillCurrent = () => repeatModeRef.current === "off" && isCurrentAccount(scope) && sourceQueue === originalQueueRef.current &&
+        selection === playRequestIdRef.current && selectedId === currentSongRef.current?.id;
       try {
         const settings = await getSettings();
-        if (!settings.smartAutoplayEnabled || !shouldAppend()) return [];
+        if (!settings.smartAutoplayEnabled || !shouldAppend() || !stillCurrent()) return [];
 
         lastAutoplaySeedIdRef.current = seedSong.id;
         updatePlaybackEngineSnapshot({ isAutoplayLoading: true });
@@ -271,21 +294,23 @@ export function usePlayerCoreState({
           limit: 12,
         });
 
-        if (!shouldAppend()) {
+        if (!shouldAppend() || !stillCurrent()) {
           // A sleep timer can be armed while provider recommendations are in
           // flight. Preserve the existing queue and allow a later retry if the
           // timer is cancelled instead of consuming this seed permanently.
           if (lastAutoplaySeedIdRef.current === seedSong.id) lastAutoplaySeedIdRef.current = null;
           return [];
         }
-        if (!isCurrentAccount(scope) || sourceQueue !== originalQueueRef.current) return [];
         const existingIds = new Set(queueRef.current.map((song) => song.id));
         const additions = recommendations.filter((song) => {
           if (existingIds.has(song.id)) return false;
           existingIds.add(song.id);
           return true;
         });
-        if (additions.length === 0) return [];
+        if (additions.length === 0) {
+          lastAutoplaySeedIdRef.current = null;
+          return [];
+        }
 
         const currentActiveQueue = queueRef.current;
         const currentActiveSource = originalQueueRef.current;
@@ -325,6 +350,7 @@ export function usePlayerCoreState({
 
         return additions;
       } catch (err) {
+        if (lastAutoplaySeedIdRef.current === seedSong.id) lastAutoplaySeedIdRef.current = null;
         logger.error("[Autoplay] Error appending recommendations:", err);
         return [];
       } finally {

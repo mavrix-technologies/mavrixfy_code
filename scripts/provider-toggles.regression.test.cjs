@@ -8,7 +8,7 @@ function load(file, deps) {
   const module = { exports: {} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true },
-  }).outputText, { module, exports: module.exports, require: name => {
+  }).outputText, { module, exports: module.exports, URL, require: name => {
     if (!(name in deps)) throw Error(name); return deps[name];
   } });
   return module.exports;

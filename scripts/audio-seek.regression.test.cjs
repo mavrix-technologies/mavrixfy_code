@@ -20,7 +20,7 @@ function fixture({ native = false, fails = false, pendingProgress } = {}) {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
   vm.runInNewContext(code, { module, exports: module.exports, require: name => {
-    if (name === "react") return { useCallback: fn => fn, useEffect() {} };
+    if (name === "react") return { useCallback: fn => fn, useRef: current => ({ current }), useEffect() {} };
     if (name.includes("ExpoAvAdapter")) return engine;
     if (name.includes("timeFormatters")) return { toDurationSeconds: Number };
     if (name === "./audioTimeline") return require("./helpers/audio-timeline-fixture.cjs");
@@ -81,4 +81,30 @@ test("late seek progress cannot seek a newer playback request for the same song"
   f.options.playRequestIdRef.current++;
   resolve({ duration: 200, position: 30 }); await pending;
   assert.equal(f.targets.length, 0);
+});
+
+test("rapid seeks keep the latest target when progress snapshots resolve out of order", async () => {
+  let first, second;
+  const f = fixture({ native: true });
+  let calls = 0;
+  f.options.TrackPlayer.getProgress = () => new Promise(resolve => { if (++calls === 1) first = resolve; else second = resolve; });
+  const oldSeek = f.seekTo(0.2), latestSeek = f.seekTo(0.8);
+  second({ duration: 200, position: 30 }); await latestSeek;
+  first({ duration: 200, position: 30 }); await oldSeek;
+  assert.deepEqual(f.targets, [160]);
+  assert.equal(f.overrides.at(-1).seconds, 160);
+});
+
+test("a rejected older seek cannot clear the latest seek position or show an obsolete error", async () => {
+  let rejectFirst;
+  const f = fixture({ native: true });
+  let calls = 0;
+  f.options.TrackPlayer.seekTo = () => ++calls === 1 ? new Promise((_resolve, reject) => { rejectFirst = reject; }) : Promise.resolve();
+  const oldSeek = f.seekTo(0.2); await new Promise(resolve => setImmediate(resolve));
+  assert.equal(calls, 1, "the first native seek is outstanding before the second request");
+  await f.seekTo(0.8);
+  rejectFirst(Error("old seek failed")); await oldSeek;
+  assert.equal(f.overrides.at(-1).seconds, 200.373 * 0.8);
+  assert.equal(f.notices.length, 0);
+  assert.equal(f.positions.length, 0);
 });

@@ -90,7 +90,7 @@ export function searchScreenReducer(
       return {
         ...state,
         suggestions: action.suggestions,
-        suggestionsOpen: action.suggestions.length > 0,
+        suggestionsOpen: state.suggestionsOpen,
       };
     case "SET_SUGGESTIONS_OPEN":
       return {

@@ -12,7 +12,7 @@ function load(file, imports, globals = {}) {
   vm.runInNewContext(code, { module, exports: module.exports, require(name) {
     if (!(name in imports)) throw new Error(`Unexpected dependency: ${name}`);
     return imports[name];
-  }, ...globals });
+  }, setTimeout, clearTimeout, ...globals });
   return module.exports;
 }
 
@@ -56,6 +56,28 @@ test("failed splash retention still attempts hide and hide failure cannot reject
   });
   await native.hideNativeSplash("recovery");
   assert.equal(hides, 1); assert.equal(warnings.length, 1);
+});
+
+test("unacknowledged native splash retention cannot indefinitely cover the login screen", async () => {
+  const retention = deferred(); let hides = 0, deadline;
+  const native = load("src/features/launch/nativeSplash.ts", {
+    "@/lib/logger": { logger: { warn() {} } },
+    "expo-constants": { __esModule: true, default: { executionEnvironment: "bare" } },
+    "expo-splash-screen": {
+      preventAutoHideAsync: () => retention.promise,
+      setOptions() {},
+      hideAsync: async () => { hides++; },
+    },
+  }, {
+    setTimeout(fn, ms) { deadline = { fn, ms }; return 1; }, clearTimeout() {},
+  });
+  const request = native.hideNativeSplash("logoReady");
+  assert.equal(native.hideNativeSplash("recovery"), request);
+  await flush(); assert.equal(hides, 0);
+  assert.equal(deadline.ms, 1000); deadline.fn(); await request;
+  assert.equal(hides, 1, "native dismissal must be attempted even if retention never acknowledges");
+  retention.resolve(true); await flush();
+  assert.equal(hides, 1, "a late acknowledgement must not repeat dismissal");
 });
 
 function fixture(options = {}) {
@@ -335,7 +357,8 @@ function find(tree, predicate) {
   }
 }
 
-test("startup belongs to the app root, survives auth remounts, and schedules ads only after exit", () => {
+for (const fontOutcome of ["loaded", "error", "stalled"]) {
+test(`startup survives ${fontOutcome} fonts and auth remounts without launch ads or login sheet overlays`, () => {
   const f = fixture(); const imports = {};
   const source = ts.createSourceFile("root.tsx", fs.readFileSync("app/_layout.tsx", "utf8"), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
   const noop = () => {};
@@ -345,15 +368,19 @@ test("startup belongs to the app root, survives auth remounts, and schedules ads
     for (const name of statement.importClause?.namedBindings?.elements || []) entry[name.propertyName?.text || name.name.text] = noop;
     imports[statement.moduleSpecifier.text] = entry;
   }
-  let authenticated = true, replacements = 0, ads = 0, fontsLoaded = false;
+  let authenticated = true, replacements = 0, ads = 0, fontsLoaded = false, fontError = null;
   const idleJobs = [], maintenance = [];
   let segments = ["(tabs)"];
   Object.assign(imports, {
     react: f.imports.react, "react/jsx-runtime": f.imports["react/jsx-runtime"],
     "react-native": { ...f.imports["react-native"], Platform: { OS: "ios" }, View: "View", LogBox: { ignoreLogs: noop } },
     "@/constants/colors": { __esModule: true, default: { background: "#121212" } },
+    "@/components/QueueBottomSheet": { __esModule: true, default: "QueueBottomSheet" },
+    "@/components/AddSongsModal": { __esModule: true, default: "AddSongsBottomSheet" },
+    "@/services/youtube/YouTubePoTokenHost": { YouTubePoTokenHost: "YouTubePoTokenHost" },
     "react-native-paper": { MD3DarkTheme: { colors: {} }, PaperProvider: "PaperProvider" },
-    "expo-font": { useFonts: () => [fontsLoaded] },
+    "expo-font": { useFonts: () => [fontsLoaded, fontError] },
+    "@/lib/logger": { logger: { warn: noop, error: noop } },
     "@/utils/idleTask": { runAfterIdle: fn => { idleJobs.push(fn); return noop; } },
     "@/lib/remoteConfig": { initRemoteConfig: () => maintenance.push("config") },
     "@/lib/analytics": { logAppOpen: () => maintenance.push("analytics") },
@@ -365,13 +392,19 @@ test("startup belongs to the app root, survives auth remounts, and schedules ads
     "@/features/launch/nativeSplash": { hideNativeSplash: async () => {} },
     "@/services/ads/appLaunchAdService": { showAppLaunchAd: () => { ads++; } },
   });
-  const rootModule = load("app/_layout.tsx", imports, { ...f.globals, __DEV__: false });
+  const rootModule = load("app/_layout.tsx", imports, { ...f.globals, AbortController, __DEV__: false });
   const root = f.mount(rootModule.default);
   let tree = root.render();
   assert.ok(find(tree, node => node.type === "LaunchSplash"), "intro mounts before fonts finish");
   assert.ok(find(tree, node => node.type === "AuthProvider"), "auth starts in parallel with fonts");
   assert.equal(find(tree, node => node.type?.name === "RootLayoutNav"), undefined);
-  fontsLoaded = true; tree = root.render();
+  if (fontOutcome === "loaded") fontsLoaded = true;
+  else if (fontOutcome === "error") fontError = Error("Font unavailable");
+  else {
+    const deadline = [...f.timers.values()].find(timer => timer.ms === 8000);
+    assert.ok(deadline, "unsettled fonts have a startup deadline"); deadline.fn();
+  }
+  tree = root.render();
   let launch = find(tree, node => node.type === "LaunchSplash");
   assert.equal(launch.props.ready, false);
   let nav = find(tree, node => node.type?.name === "RootLayoutNav");
@@ -383,13 +416,21 @@ test("startup belongs to the app root, survives auth remounts, and schedules ads
   nav = find(tree, node => node.type?.name === "RootLayoutNav");
   const before = f.mount(nav.type, nav.props);
   const navTree = before.render();
+  assert.equal(find(navTree, node => node.type === imports["@/components/QueueBottomSheet"].default), undefined,
+    "a signed-out login screen must not host an invisible queue sheet");
+  assert.equal(find(navTree, node => node.type === imports["@/components/AddSongsModal"].default), undefined);
+  assert.equal(find(navTree, node => node.type === imports["@/services/youtube/YouTubePoTokenHost"].YouTubePoTokenHost), undefined);
   tree = root.render(); assert.equal(find(tree, node => node.type === "LaunchSplash").props.ready, false, "navigation must lay out before exit");
   navTree.props.onLayout({ nativeEvent: { layout: { width: 390, height: 844 } } }); before.render();
   assert.equal([...f.timers.values()].some(timer => timer.ms === 1200), false);
   tree = root.render(); launch = find(tree, node => node.type === "LaunchSplash");
   assert.equal(launch.props.ready, true);
   assert.equal(idleJobs.length, 0, "maintenance does not compete with the intro or first Home layout");
-  launch.props.onComplete(); before.unmount();
+  launch.props.onComplete();
+  before.render({ ...nav.props, launchComplete: true });
+  assert.equal([...f.timers.values()].some(timer => timer.ms === 1200), false,
+    "fresh-install login remains free of launch ads after the splash exits");
+  before.unmount();
   tree = root.render(); assert.equal(find(tree, node => node.type === "LaunchSplash"), undefined);
   assert.equal(maintenance.length, 0);
   assert.equal(idleJobs.length, 1); idleJobs[0]();
@@ -397,9 +438,21 @@ test("startup belongs to the app root, survives auth remounts, and schedules ads
   // AuthProvider replaces its keyed children on sign-in, while RootLayout stays mounted.
   authenticated = true; segments = ["(tabs)"];
   nav = find(tree, node => node.type?.name === "RootLayoutNav");
-  const remounted = f.mount(nav.type, nav.props); remounted.render();
-  const adTimer = [...f.timers.values()].find(timer => timer.ms === 1200);
-  assert.ok(adTimer); adTimer.fn(); assert.equal(ads, 1);
+  const remounted = f.mount(nav.type, nav.props); const homeTree = remounted.render();
+  assert.ok(find(homeTree, node => node.type === imports["@/components/QueueBottomSheet"].default),
+    "authenticated Home retains the shared queue sheet");
+  assert.equal([...f.timers.values()].some(timer => timer.ms === 1200), false,
+    "authenticated navigation does not schedule launch ads");
+  homeTree.props.onLayout({ nativeEvent: { layout: { width: 390, height: 844 } } }); remounted.render();
+  assert.equal([...f.timers.values()].some(timer => timer.ms === 1200), false,
+    "Home remains free of launch ads after layout and splash exit");
+  assert.equal(ads, 0);
+  segments = ["(tabs)", "search"]; remounted.render();
+  assert.equal([...f.timers.values()].some(timer => timer.ms === 1200), false);
+  authenticated = false; segments = ["login"]; remounted.render();
+  assert.equal([...f.timers.values()].some(timer => timer.ms === 1200), false);
   tree = root.render(); assert.equal(find(tree, node => node.type === "LaunchSplash"), undefined);
+  assert.equal(ads, 0, "authentication and navigation changes never request a launch ad");
   remounted.unmount(); root.unmount();
 });
+}

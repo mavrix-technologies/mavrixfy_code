@@ -21,6 +21,7 @@ import { normalizeText } from "@/lib/searchUtils";
 import {
 addSearchHistoryItem,
 addSongSearchHistoryItem,
+clearSearchHistory,
 getSearchHistory,
 removeSearchHistoryItem,
 } from "@/lib/storage";
@@ -43,6 +44,14 @@ type SearchScreenState,
 export {
 createInitialSearchState,searchScreenReducer,type SearchScreenAction,type SearchScreenState
 };
+
+export type SearchSuggestionRow = { label: string; isHistory: boolean } & (
+  | { kind: "query" }
+  | { kind: "song"; song: Song }
+  | { kind: "artist"; artist: ArtistResult }
+  | { kind: "album"; album: AlbumResult }
+  | { kind: "playlist"; playlist: PlaylistResult }
+);
 
 export function useSearchEngine(params: { q?: string | string[]; name?: string | string[] }) {
   const insets = useSafeAreaInsets();
@@ -183,6 +192,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       dispatch({ type: "SET_SUGGESTIONS_OPEN", open: false });
       return;
     }
+    if (!isOnline || trimmed.length < 2) return;
 
     if (suggestionsTimerRef.current) {
       clearTimeout(suggestionsTimerRef.current);
@@ -208,7 +218,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       }
       suggestionsAbortRef.current?.abort();
     };
-  }, [query]);
+  }, [query, isOnline]);
 
   const rememberRecentSearch = useCallback((label: string) => {
     const normalized = normalizeRecentSearchLabel(label);
@@ -312,6 +322,12 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     setRecentSearches((prev) => prev.filter((item) => item.id !== id));
     void removeSearchHistoryItem(id)
       .then((items) => setRecentSearches(toRecentSearchItems(items)))
+      .catch(() => undefined);
+  }, []);
+
+  const handleClearRecentSearches = useCallback(() => {
+    void clearSearchHistory()
+      .then(items => setRecentSearches(toRecentSearchItems(items)))
       .catch(() => undefined);
   }, []);
 
@@ -508,13 +524,33 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
   );
 
 
-  const suggestionRows = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    const matching = recentSearches.filter(item => item.type === "query" && item.label.toLowerCase().includes(q)).slice(0, 3);
-    const seen = new Set(matching.map(item => item.label.toLowerCase()));
-    return [...matching.map(item => ({ label: item.label, isHistory: true })),
-      ...suggestions.filter(label => !seen.has(label.toLowerCase())).map(label => ({ label, isHistory: false }))];
-  }, [query, recentSearches, suggestions]);
+  const suggestionRows = useMemo<SearchSuggestionRow[]>(() => {
+    const normalizedQuery = normalizeText(query);
+    if (!normalizedQuery) return [];
+    const rows: SearchSuggestionRow[] = [];
+    if (normalizedQuery.length >= 2 && normalizeText(searchDisplayQuery) === normalizedQuery && !searchLoading && !searchError) {
+      const candidates: SearchSuggestionRow[] = [
+        ...songResults.map(song => ({ kind: "song" as const, label: song.title, song, isHistory: false })),
+        ...artistResults.map(artist => ({ kind: "artist" as const, label: artist.name, artist, isHistory: false })),
+        ...albumResults.map(album => ({ kind: "album" as const, label: album.name, album, isHistory: false })),
+        ...playlistResults.map(playlist => ({ kind: "playlist" as const, label: playlist.name, playlist, isHistory: false })),
+      ];
+      const best = candidates.find(item => item.label && normalizeText(item.label) === normalizedQuery) ??
+        candidates.find(item => item.label && normalizeText(item.label).startsWith(`${normalizedQuery} `));
+      if (best) rows.push(best);
+    }
+    const seen = new Set(rows.map(item => normalizeText(item.label)));
+    const addQuery = (label: string, isHistory: boolean) => {
+      const key = normalizeText(label);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      rows.push({ kind: "query", label, isHistory });
+    };
+    recentSearches.filter(item => item.type === "query" && normalizeText(item.label).startsWith(normalizedQuery))
+      .slice(0, 3).forEach(item => addQuery(item.label, true));
+    suggestions.forEach(label => addQuery(label, false));
+    return rows.slice(0, 8);
+  }, [query, searchDisplayQuery, searchLoading, searchError, songResults, artistResults, albumResults, playlistResults, recentSearches, suggestions]);
 
   return {
     isOnline,
@@ -548,6 +584,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     handleRecentSearchPress,
     handleSuggestionPress,
     handleRemoveRecentSearch,
+    handleClearRecentSearches,
     handleResultFilterSelect,
     handleSongResultPress,
     handleArtistPress,

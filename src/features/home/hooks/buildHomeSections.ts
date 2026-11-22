@@ -6,6 +6,7 @@ export type HomeListItem = HomeSectionItem
   | { id: "youtube-quick-picks"; type: "youtube-quick-picks" }
   | { id: "youtube-status"; type: "youtube-status" }
   | { id: "releases-status"; type: "releases-status" }
+  | { id: "trending-status"; type: "trending-status" }
   | { id: string; type: "youtube-section"; section: YouTubeHomeSection };
 
 export function buildHomeSections(
@@ -34,7 +35,10 @@ export function buildHomeSections(
   const rows = (items: YouTubeHomeSection[]): HomeListItem[] =>
     items.map((section) => ({ id: section.id, type: "youtube-section", section }));
 
-  const releaseShelves = youtubeEnabled ? explore.filter((section) => section.category === "new-releases") : [];
+  const regionalReleases = explore.filter(section => section.category === "new-releases");
+  const releaseShelves = regionalReleases.length ? regionalReleases : sections.filter(section => section.category === "new-releases");
+  const regionalTrends = explore.filter(section => section.category === "trending");
+  const trending = regionalTrends.length ? regionalTrends : sections.filter(section => section.category === "trending");
   const hasRegionalShelves = youtubeEnabled && explore.some((section) => section.id.startsWith("youtube-regional-"));
   const latest: YouTubeHomeSection = {
     id: "youtube-new-releases",
@@ -79,6 +83,9 @@ export function buildHomeSections(
   if (category === "New Releases") {
     return releasesAvailable ? rows([latest]) : [{ id: "releases-status", type: "releases-status" }];
   }
+  if (category === "Trending") {
+    return trending.length ? rows(trending) : [{ id: "trending-status", type: "trending-status" }];
+  }
 
   if (category === "Songs" || category === "Playlists" || category === "Albums") {
     const filtered = discovery
@@ -109,6 +116,7 @@ export function buildHomeSections(
     ...(youtubeEnabled ? [{ id: "youtube-quick-picks", type: "youtube-quick-picks" } as HomeListItem] : []),
     ...(spotifySection ? [spotifySection] : []),
     ...(releasesAvailable ? rows([latest]) : ([{ id: "releases-status", type: "releases-status" }] as HomeListItem[])),
+    ...rows(trending.filter(section => !seenDiscoveryIds.has(section.id)).slice(0, 2)),
     ...(firstDiscovery ? rows([firstDiscovery]) : []),
     ...(spotifyMixes ? [spotifyMixes] : []),
     ...(secondDiscovery ? rows([secondDiscovery]) : []),

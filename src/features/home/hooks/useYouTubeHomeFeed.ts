@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { useFocusEffect } from "expo-router";
+import { AppState } from "react-native";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNetwork } from "@/contexts/NetworkContext";
@@ -18,7 +19,9 @@ export function useYouTubeHomeFeed() {
   const [history, setHistory] = useState<{ account: string; seeds: Song[] }>();
   const scope = getAccountScope();
   const [cacheReady, setCacheReady] = useState<{ account: string; generation: number }>();
+  const [focused, setFocused] = useState(false);
   useFocusEffect(useCallback(() => {
+    setFocused(true);
     let active = true;
     const refreshHistory = () => {
       const historyScope = getAccountScope();
@@ -34,7 +37,7 @@ export function useYouTubeHomeFeed() {
       }).catch(() => { if (active && isCurrentAccount(historyScope)) setHistory({ account, seeds: [] }); });
     };
     refreshHistory();
-    return () => { active = false; };
+    return () => { active = false; setFocused(false); };
   }, [account, scope.generation]));
   const seeds = history?.account === account ? history.seeds : undefined;
   const hydrated = cacheReady?.account === account && cacheReady.generation === scope.generation;
@@ -57,22 +60,40 @@ export function useYouTubeHomeFeed() {
     refetchOnWindowFocus: false,
   });
   const explore = useQuery({
-    queryKey: ["youtube-explore", "IN", "en", "regional-v2"],
+    queryKey: ["youtube-explore", "IN", "en", "regional-v3"],
     queryFn: ({ signal }) => loadYouTubeExplore(signal),
     enabled: youTubeAvailable() && isOnline && hydrated,
     staleTime: 20 * 60 * 1000, gcTime: 30 * 60 * 1000,
     retry: 1, refetchOnReconnect: false, refetchOnMount: false, refetchOnWindowFocus: false,
   });
+  const { refetch: refreshHome, dataUpdatedAt: homeUpdatedAt, fetchStatus: homeFetchStatus, errorUpdatedAt: homeErrorAt } = home;
+  const { refetch: refreshExplore, dataUpdatedAt: exploreUpdatedAt, fetchStatus: exploreFetchStatus, errorUpdatedAt: exploreErrorAt } = explore;
+  useEffect(() => {
+    if (!focused || !hydrated || !isOnline || !youTubeAvailable()) return;
+    const refreshStale = () => {
+      const now = Date.now();
+      if (seeds !== undefined && homeUpdatedAt && homeFetchStatus === "idle" && now - Math.max(homeUpdatedAt, homeErrorAt) >= 60 * 60_000)
+        void refreshHome({ cancelRefetch: false });
+      if (exploreUpdatedAt && exploreFetchStatus === "idle" && now - Math.max(exploreUpdatedAt, exploreErrorAt) >= 20 * 60_000)
+        void refreshExplore({ cancelRefetch: false });
+    };
+    if (AppState.currentState === "active") refreshStale();
+    const timer = setInterval(() => { if (AppState.currentState === "active") refreshStale(); }, 60_000);
+    const subscription = AppState.addEventListener("change", state => { if (state === "active") refreshStale(); });
+    return () => { clearInterval(timer); subscription.remove(); };
+  }, [focused, hydrated, isOnline, seeds, homeUpdatedAt, homeErrorAt, homeFetchStatus, exploreUpdatedAt, exploreErrorAt, exploreFetchStatus, refreshHome, refreshExplore]);
   useEffect(() => {
     let active = true;
     const accountScope = getAccountScope();
     const homeKey = ["youtube-home", account, accountScope.generation];
-    const exploreKey = ["youtube-explore", "IN", "en", "regional-v2"];
+    const exploreKey = ["youtube-explore", "IN", "en", "regional-v3"];
     const homeCache = readHomeFeedCache<YouTubeRecommendationFeed>(accountStorageKey("home-recommendations-v1", account)).then(cached => {
       if (active && isCurrentAccount(accountScope) && cached && !queryClient.getQueryData(homeKey))
         queryClient.setQueryData(homeKey, cached.data, { updatedAt: cached.at });
     });
-    const exploreCache = readHomeFeedCache<Awaited<ReturnType<typeof loadYouTubeExplore>>>("@mavrixfy_explore_IN_en_regional_v2").then(cached => {
+    type ExploreFeed = Awaited<ReturnType<typeof loadYouTubeExplore>>;
+    const exploreCache = readHomeFeedCache<ExploreFeed>("@mavrixfy_explore_IN_en_regional_v3")
+      .then(cached => cached ?? readHomeFeedCache<ExploreFeed>("@mavrixfy_explore_IN_en_regional_v2")).then(cached => {
       if (active && cached && !queryClient.getQueryData(exploreKey))
         queryClient.setQueryData(exploreKey, cached.data, { updatedAt: cached.at });
     });
@@ -88,7 +109,7 @@ export function useYouTubeHomeFeed() {
   }, [account, home.data, home.dataUpdatedAt, home.isFetching, home.isSuccess, home.isPlaceholderData]);
   useEffect(() => {
     if (explore.data && !explore.isFetching && explore.isSuccess)
-      void writeHomeFeedCache("@mavrixfy_explore_IN_en_regional_v2", explore.data, explore.dataUpdatedAt);
+      void writeHomeFeedCache("@mavrixfy_explore_IN_en_regional_v3", explore.data, explore.dataUpdatedAt);
   }, [explore.data, explore.dataUpdatedAt, explore.isFetching, explore.isSuccess]);
   return { ...home, explore };
 }

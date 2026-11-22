@@ -2,6 +2,17 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const { fixture } = require("./helpers/expo-player-fixture.cjs");
 
+test("Expo status events without a timestamp do not reset elapsed playback", async () => {
+  const f = fixture();
+  const positions = [];
+  f.onStatusUpdate(status => positions.push(status.position));
+  await f.loadAndPlay("https://audio.invalid/track");
+  f.players[0].emit({ playing: true, currentTime: 12, duration: 180 });
+  f.players[0].emit({ playing: true, isBuffering: true, duration: 180 });
+  assert.deepEqual(positions.slice(-2), [12, 12]);
+  f.destroy();
+});
+
 
 
 

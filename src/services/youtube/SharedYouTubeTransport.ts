@@ -129,6 +129,9 @@ function safeError(error: unknown) {
     .replace(/https?:\/\/[^\s"']+/gi, "[URL]")
     .replace(/(?:authorization|cookie|(?:po_?)?token|signature)\s*[:=]\s*[^\r\n;,]+/gi, "[redacted]").slice(0, 400);
 }
+const releaseShelfTitle = /\b(?:new releases?|new music|latest releases?|fresh releases?)\b/i;
+const chartShelfTitle = /\b(?:trending|charts|top (?:songs|tracks))\b/i;
+
 function parseHomeShelves(homeSections: Iterable<InstanceType<typeof YTNodes.MusicCarouselShelf> | InstanceType<typeof YTNodes.MusicTastebuilderShelf>>, includeAlbums = false) {
   const songs: NativeTrack[] = [], playlists: NativePlaylist[] = [];
   const sections: NativeHomeSection[] = [];
@@ -156,7 +159,7 @@ function parseHomeShelves(homeSections: Iterable<InstanceType<typeof YTNodes.Mus
         }
       }
     }
-    if (includeAlbums) row.category = /new|release|fresh|latest/i.test(row.title) ? "new-releases" : /trend|chart|top/i.test(row.title) ? "trending" : "discover";
+    row.category = releaseShelfTitle.test(row.title) ? "new-releases" : chartShelfTitle.test(row.title) ? "trending" : "discover";
     if (row.songs.length || row.playlists.length) {
       sections.push(row); songs.push(...row.songs); playlists.push(...row.playlists);
     }
@@ -192,6 +195,7 @@ export const sharedYouTubeTransport: YouTubeNative = {
       const languages = ["Hindi", "Punjabi", "Tamil", "Telugu", "Marathi", "Bengali"];
       const regional: NativeHomeSection[] = [];
       const releases: NativePlaylist[] = [];
+      const releaseSongs: NativeTrack[] = [];
       // At most two regional requests in flight, no playlist/song stream preloading.
       for (let offset = 0; offset < languages.length; offset += 2) {
         const batch = await Promise.allSettled(languages.slice(offset, offset + 2).map(async language => {
@@ -207,15 +211,28 @@ export const sharedYouTubeTransport: YouTubeNative = {
         for (const result of batch) {
           if (result.status !== "fulfilled" || !result.value) continue;
           const { language, feed } = result.value;
-          releases.push(...feed.playlists.filter(item => /\b(new music|new releases|fresh|latest)\b/i.test(item.name)));
-          if (feed.songs.length || feed.playlists.length) regional.push({ id: `youtube-regional-${language.toLowerCase()}`,
-            title: `${language} Hits`, category: "discover", songs: feed.songs.slice(0, 12),
-            playlists: feed.playlists.slice(0, 14) });
+          const regionalId = `youtube-regional-${language.toLowerCase()}`;
+          for (const section of feed.sections) {
+            if (section.category === "new-releases") {
+              releaseSongs.push(...section.songs);
+              releases.push(...section.playlists);
+            } else if (section.category === "trending") {
+              regional.push({ ...section, id: `${regionalId}-${section.id}`, title: `${language} · ${section.title}` });
+            }
+          }
+          releases.push(...feed.playlists.filter(item => releaseShelfTitle.test(item.name)));
+          const discovery = feed.sections.filter(section => section.category === "discover");
+          const songs = discovery.flatMap(section => section.songs).slice(0, 12);
+          const playlists = discovery.flatMap(section => section.playlists).filter(item => !releaseShelfTitle.test(item.name)).slice(0, 14);
+          if (songs.length || playlists.length) regional.push({ id: regionalId,
+            title: `${language} Hits`, category: "discover", songs, playlists });
         }
       }
       const latest: NativeHomeSection = { id: "youtube-regional-new-releases", title: "New Releases", category: "new-releases",
-        songs: [], playlists: [...new Map(releases.map(item => [item.id, item])).values()] };
-      const sections = [...(latest.playlists.length ? [latest] : []), ...regional];
+        songs: [...new Map(releaseSongs.map(song => [song.videoId, song])).values()],
+        playlists: [...new Map(releases.map(item => [item.id, item])).values()] };
+      if (!latest.songs.length && !latest.playlists.length && !regional.length) throw new Error("Regional music feeds are unavailable");
+      const sections = [...(latest.songs.length || latest.playlists.length ? [latest] : []), ...regional];
       return { sections, songs: sections.flatMap(section => section.songs), playlists: sections.flatMap(section => section.playlists) };
     });
   },

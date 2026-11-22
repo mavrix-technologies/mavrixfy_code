@@ -22,7 +22,15 @@ let hideRequest: Promise<void> | undefined;
 
 /** One handoff shared by startup and error recovery, including failed retention. */
 export function hideNativeSplash(reason: string): Promise<void> {
-  hideRequest ??= nativeSplashReady
+  hideRequest ??= new Promise<void>(resolve => {
+    // Some devices never acknowledge retention. Still attempt dismissal once
+    // the JS overlay is mounted instead of leaving the native splash on top.
+    const timer = setTimeout(resolve, 1000);
+    void nativeSplashReady.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  })
     .then(() => SplashScreen.hideAsync())
     .catch(error => reportSplashError(`Could not hide native splash (${reason})`, error));
   return hideRequest;

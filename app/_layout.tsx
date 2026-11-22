@@ -18,7 +18,6 @@ import * as Animated from "@/lib/nativeAnimated";
 import { queryClient } from "@/lib/query-client";
 import { globalQueueSheetRef } from "@/lib/queueRef";
 import { initRemoteConfig } from "@/lib/remoteConfig";
-import { showAppLaunchAd } from "@/services/ads/appLaunchAdService";
 import { syncEqualizerWithNative } from "@/services/audio/audioEqualizer";
 import { YouTubePoTokenHost } from "@/services/youtube/YouTubePoTokenHost";
 import { checkAppVersion,registerForPushNotificationsAsync } from "@/services/notificationService";
@@ -231,7 +230,10 @@ function useRootLayoutNavigation(launchComplete: boolean) {
 
   const redirectPending = (isAuthenticated && activeSegment === "login") ||
     (!isAuthenticated && !isAllowedGuest && activeSegment === "(tabs)");
-  return { launchReady: !loading && !!activeSegment && !redirectPending };
+  return {
+    launchReady: !loading && !!activeSegment && !redirectPending,
+    playerToolsEnabled: !loading && (isAuthenticated || isAllowedGuest) && activeSegment !== "login",
+  };
 }
 
 const isAndroid = Platform.OS === "android";
@@ -272,8 +274,7 @@ const artistMixScreenOptions = {
 };
 
 function RootLayoutNav({ launchComplete, onReady }: { launchComplete: boolean; onReady: () => void }) {
-  const { launchReady } = useRootLayoutNavigation(launchComplete);
-  const { loading } = useAuth();
+  const { launchReady, playerToolsEnabled } = useRootLayoutNavigation(launchComplete);
   const [navigationLaidOut, setNavigationLaidOut] = useState(false);
   const markNavigationLaidOut = useCallback(({ nativeEvent: { layout } }: LayoutChangeEvent) => {
     if (layout.width > 0 && layout.height > 0) setNavigationLaidOut(true);
@@ -282,15 +283,6 @@ function RootLayoutNav({ launchComplete, onReady }: { launchComplete: boolean; o
   useEffect(() => {
     if (launchReady && navigationLaidOut) onReady();
   }, [launchReady, navigationLaidOut, onReady]);
-
-  useEffect(() => {
-    if (!loading && launchComplete) {
-      const timer = setTimeout(() => {
-        void showAppLaunchAd();
-      }, 1200);
-      return () => clearTimeout(timer);
-    }
-  }, [loading, launchComplete]);
 
   return (
     <View style={{ flex: 1 }} onLayout={markNavigationLaidOut} accessibilityElementsHidden={!launchComplete}
@@ -320,12 +312,12 @@ function RootLayoutNav({ launchComplete, onReady }: { launchComplete: boolean; o
         <Stack.Screen name="equalizer" />
       </Stack>
 
-      <YouTubePoTokenHost />
+      {playerToolsEnabled && <YouTubePoTokenHost />}
 
-      <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
+      {playerToolsEnabled && <View style={[StyleSheet.absoluteFill, { zIndex: 999 }]} pointerEvents="box-none">
         <QueueBottomSheet ref={globalQueueSheetRef} />
         <AddSongsBottomSheet ref={globalAddSongsSheetRef} />
-      </View>
+      </View>}
     </View>
   );
 }
@@ -335,6 +327,7 @@ export default function RootLayout() {
   // Owned above AuthProvider's keyed subtree: signing in must not replay startup.
   const [launchReady, setLaunchReady] = useState(false);
   const [launchComplete, setLaunchComplete] = useState(false);
+  const [fontDeadlineReached, setFontDeadlineReached] = useState(false);
   const markLaunchReady = useCallback(() => setLaunchReady(true), []);
   const finishLaunch = useCallback(() => setLaunchComplete(true), []);
 
@@ -374,6 +367,15 @@ export default function RootLayout() {
     ...FontAwesome.font,
   });
 
+  useEffect(() => {
+    if (fontsLoaded || fontError || fontDeadlineReached) return;
+    const timer = setTimeout(() => {
+      logger.warn("[Launch] Font loading exceeded 8s; continuing with fallback fonts.");
+      setFontDeadlineReached(true);
+    }, 8000);
+    return () => clearTimeout(timer);
+  }, [fontsLoaded, fontError, fontDeadlineReached]);
+
   const handleError = useCallback((err: Error) => {
     void hideNativeSplash("rootError");
     setError(err);
@@ -396,7 +398,7 @@ export default function RootLayout() {
             <PaperProvider theme={paperTheme}>
               <NetworkProvider>
                 <AuthProvider>
-                  {(fontsLoaded || fontError) ? (
+                  {(fontsLoaded || fontError || fontDeadlineReached) ? (
                     <DownloadProvider>
                       <PlayerProvider>
                         <RootLayoutNav launchComplete={launchComplete} onReady={markLaunchReady} />

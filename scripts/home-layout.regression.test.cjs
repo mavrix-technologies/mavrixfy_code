@@ -92,6 +92,16 @@ test("menu filters real content types without adding substitute provider rows", 
   assert.equal(releases[0].section.playlists[0], playlist);
 });
 
+test("Trending prefers regional charts and keeps release and discovery rows separate", () => {
+  const global = { id: "global-chart", title: "Top Songs", category: "trending", songs: [{ id: "global" }], playlists: [] };
+  const regional = { ...global, id: "youtube-regional-hindi-chart", songs: [{ id: "regional" }] };
+  const release = { ...regional, id: "regional-release", category: "new-releases" };
+  const discover = { ...regional, id: "regional-discover", category: "discover" };
+  assert.deepEqual(Array.from(buildHomeSections("Trending", true, [global], jio, [regional, release, discover]), row => row.id), [regional.id]);
+  assert.equal(buildHomeSections("Trending", true, [global], jio, [discover])[0].id, global.id);
+  assert.equal(buildHomeSections("Trending", true, [], jio, [release, discover])[0].type, "trending-status");
+});
+
 test("catalog section cleanup preserves active All, Recent and New Releases content and loading states", () => {
   const { useHomeSectionData } = load("src/features/home/hooks/useHomeSectionData.ts", { react: { useMemo: fn => fn() }, "@/lib/providerFilter": { isSongProviderAllowed: () => true, isPlaylistProviderAllowed: () => true } });
   const input = { selectedCategory: "All", categories: [{ id: "trending" }, { id: "new-releases" }, { id: "editorial" }],

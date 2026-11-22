@@ -32,6 +32,7 @@ function fixture({ shuffled = false, nativeIds, queueIds = ["a", "b", "c", "d"],
     queueIndexRef: { current: activeIndex },
     currentSongRef: { current: queue[activeIndex] },
     userQueuedSongIdsRef: { current: [] },
+    autoplaySongIdsRef: { current: [] },
     isShuffledRef: { current: shuffled },
     repeatModeRef: { current: "off" },
     isPlayingRef: { current: true },
@@ -213,6 +214,18 @@ test("YouTube Play Next skips extraction and inserts at the native next position
   assert.equal(f.state.userQueuedSongIds[0], song.id);
   assert.deepEqual(ids(f.snapshots.at(-1).queue), ids(f.state.queue));
   assert.deepEqual(ids(f.persistedStates.at(-1).queue), ids(f.state.queue));
+});
+
+test("manual additions play before autoplay in both the displayed and native queues", async () => {
+  const f = fixture();
+  f.refs.autoplaySongIdsRef.current = ["c", "d"];
+  const song = { id: "youtube_video", source: "youtube" };
+  f.operations.addToQueue(song);
+  await new Promise(resolve => setImmediate(resolve));
+  const expected = ["a", "b", song.id, "c", "d"];
+  assert.deepEqual(ids(f.state.queue), expected);
+  assert.deepEqual(ids(f.state.sourceQueue), expected);
+  assert.deepEqual(ids(f.nativeQueue), expected);
 });
 
 test("shuffle preserves the active track and restores canonical order when disabled", async () => {

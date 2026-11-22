@@ -45,7 +45,8 @@ export function cleanCoreTitle(title?: string | null): string {
     .replace(/\(.*?\)/g, "") // remove (From "...") or (Lofi)
     .replace(/\[.*?\]/g, "") // remove [Official Audio]
     .replace(/[-–—]\s*(new version|remix|lofi|lo-fi|acoustic|reprise|version|slowed|reverb|cover|unplugged|mashup|edit|mix|dance mix|audio).*$/i, "")
-    .replace(/[^\w\s]/g, "")
+    .normalize("NFKC")
+    .replace(/[^\p{L}\p{M}\p{N}\s]/gu, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -144,7 +145,7 @@ export async function fetchAutoplayRecommendations({
   }
 
   // 2. Primary Artist hits (e.g. "Arijit Singh hits")
-  if (primaryArtist) {
+  if (primaryArtist && mode !== "mood-radio") {
     queryPromises.push(
       fetchJson<any>(
         `${apiUrl}/api/search/songs?query=${encodeURIComponent(`${primaryArtist} hits`)}&limit=15`,
@@ -156,7 +157,7 @@ export async function fetchAutoplayRecommendations({
   }
 
   // 3. Secondary/Collaborating Artist or Composer hits (e.g. "Pritam hits")
-  if (secondaryArtist && secondaryArtist.toLowerCase() !== primaryArtist.toLowerCase()) {
+  if (secondaryArtist && mode !== "mood-radio" && secondaryArtist.toLowerCase() !== primaryArtist.toLowerCase()) {
     queryPromises.push(
       fetchJson<any>(
         `${apiUrl}/api/search/songs?query=${encodeURIComponent(`${secondaryArtist} hits`)}&limit=10`,
@@ -167,11 +168,10 @@ export async function fetchAutoplayRecommendations({
     );
   }
 
-  // 4. Genre / Mood-based hits (e.g. "hindi hits" or "bollywood popular")
-  const genreQuery = seedSong.genre ? `${seedSong.genre} top hits` : "bollywood hits";
-  queryPromises.push(
+  // Broaden discovery only when requested and the seed has a known genre.
+  if (seedSong.genre && (mode === "mood-radio" || mode === "similar-trending")) queryPromises.push(
     fetchJson<any>(
-      `${apiUrl}/api/search/songs?query=${encodeURIComponent(genreQuery)}&limit=10`,
+      `${apiUrl}/api/search/songs?query=${encodeURIComponent(`${seedSong.genre} top hits`)}&limit=10`,
       signal
     )
       .then((res) => parseSongArray(res?.data?.results || res?.data))
@@ -239,13 +239,10 @@ export async function fetchAutoplayRecommendations({
     }
 
     seenTitlesInBatch.add(candCoreTitle);
-    rememberAutoplaySong(song.id);
     filteredRecommendations.push(song);
-
-    if (filteredRecommendations.length >= limit) {
-      break;
-    }
   }
 
-  return filteredRecommendations;
+  const ranked = rankYouTubeCandidates(filteredRecommendations, [], limit, RECENT_AUTOPLAY_IDS);
+  ranked.forEach(song => rememberAutoplaySong(song.id));
+  return ranked;
 }

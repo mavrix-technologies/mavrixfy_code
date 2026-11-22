@@ -9,7 +9,7 @@ export function getExpoExtra(): ExpoExtra {
   try {
     const extra = Constants.expoConfig?.extra;
     if (extra && typeof extra === "object") {
-      return extra as ExpoExtra;
+      return { ...bundledExtra, ...extra };
     }
   } catch {
     // Standalone builds can throw while resolving expoConfig if the embedded manifest is unavailable.
@@ -18,7 +18,7 @@ export function getExpoExtra(): ExpoExtra {
   try {
     const manifest2Extra = (Constants as any).manifest2?.extra?.expoClient?.extra;
     if (manifest2Extra && typeof manifest2Extra === "object") {
-      return manifest2Extra as ExpoExtra;
+      return { ...bundledExtra, ...manifest2Extra };
     }
   } catch {
     // Ignore manifest lookup failures and fall back to the bundled app config.
@@ -27,7 +27,7 @@ export function getExpoExtra(): ExpoExtra {
   try {
     const manifestExtra = (Constants as any).manifest?.extra;
     if (manifestExtra && typeof manifestExtra === "object") {
-      return manifestExtra as ExpoExtra;
+      return { ...bundledExtra, ...manifestExtra };
     }
   } catch {
     // Ignore manifest lookup failures and fall back to the bundled app config.

@@ -24,7 +24,7 @@ function load(filename, imports, globals = {}) {
   return module.exports;
 }
 
-function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1, youtube = false, preferredSource = false, resolveUrl = async song => song.audioUrl, expoPlayer = {}, triggerAutoplayAppend } = {}) {
+function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nativeIds, activeIndex = 1, youtube = false, preferredSource = false, resolveUrl = async song => song.audioUrl, expoPlayer = {}, triggerAutoplayAppend, listenerTimers } = {}) {
   const songs = queueIds.map(id => ({ id, title: id, artist: "Artist", duration: 180, audioUrl: `https://audio.example/${id}` }));
   let nativeQueue = (nativeIds ?? queueIds).map(id => ({ id, url: `https://audio.example/${id}`, accountId: "guest" }));
   const scheduledDelays = [];
@@ -49,7 +49,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
     replaceNativeQueuePreservingState: async (queue, index) => { calls.push(["replace", queue.map(song => song.id), index]); },
     subscribeTrackPlayerEvent: (event, callback) => { events.set(event, callback); return noop; },
     Event: { PlaybackState: "state", PlaybackProgressUpdated: "progress", PlaybackActiveTrackChanged: "active", PlaybackQueueEnded: "ended", PlaybackSourceRequired: "source-required", PlaybackError: "error", RemotePlay: "remote-play", RemotePause: "remote-pause", RemoteStop: "remote-stop", RemoteNext: "remote-next", RemotePrevious: "remote-previous" },
-    State: { Playing: "playing", Paused: "paused", None: "none", Stopped: "stopped", Error: "error", Ended: "ended" },
+    State: { Playing: "playing", Paused: "paused", None: "none", Stopped: "stopped", Error: "error", Ended: "ended", Buffering: "buffering", Loading: "loading" },
     RepeatMode: { Off: "off", Queue: "all", Track: "one" },
   };
   options.TrackPlayer = {
@@ -102,7 +102,7 @@ function fixture({ ready = true, initialization, queueIds = ["a", "b", "c"], nat
   const operations = load("src/services/audio/audioQueueOperations.ts", imports).useAudioQueueOperations({ ...options, playSong: commands.playSong });
   return { options, commands, operations, calls, scheduledDelays, songs, snapshots, progressUpdates, storage, events, foreground, saved, cleanups,
     startup: () => load("src/services/audio/audioStartupReconcile.ts", imports).useStartupPlaybackReconcile(options),
-    listen: () => load("src/services/audio/audioSyncListeners.ts", imports).useAudioSyncListeners(options),
+    listen: () => load("src/services/audio/audioSyncListeners.ts", imports, listenerTimers).useAudioSyncListeners(options),
     changeAccount: () => accountGeneration++,
   };
 }
@@ -526,7 +526,63 @@ test("buffered progress follows the accepted source and ignores outgoing or inva
   assert.equal(f.progressUpdates.length, count);
   f.options.pendingPlayRequestRef.current = null;
   f.events.get("progress")({ track: 1, trackId: "b", position: 14, duration: 180, buffered: NaN });
-  assert.equal(f.progressUpdates.at(-1).bufferedPositionMillis, 0);
+  assert.equal(f.progressUpdates.at(-1).bufferedPositionMillis, 64125);
+  f.events.get("progress")({ track: 1, trackId: "b", duration: 180 });
+  assert.equal(f.options.positionSecondsRef.current, 14);
+});
+
+function stalledNativeFixture() {
+  const timers = new Map();
+  let serial = 0;
+  const f = fixture({ listenerTimers: {
+    setTimeout(fn, delay) { const id = ++serial; timers.set(id, { fn, delay }); return id; },
+    clearTimeout(id) { timers.delete(id); },
+  } });
+  const attempts = [];
+  const state = { queue: f.songs.map(song => ({ id: song.id, url: song.audioUrl })), index: 1,
+    state: "buffering", position: 37, playWhenReady: true };
+  f.options.TrackPlayer.getPlaybackSnapshot = async () => state;
+  f.options.playSongRef.current = async (song, _queue, position) => {
+    attempts.push([song.id, position]);
+    f.events.get("state")({ state: "paused" });
+  };
+  f.options.desiredPlayStateRef.current = true;
+  f.listen();
+  return { ...f, attempts, timers, state, async elapse() {
+    const callbacks = [...timers.values()];
+    timers.clear();
+    callbacks.forEach(timer => timer.fn());
+    await tick();
+  } };
+}
+
+test("a confirmed native buffer stall retries once at the existing position and then stops buffering", async () => {
+  const f = stalledNativeFixture();
+  f.events.get("state")({ state: "buffering", trackId: "b" });
+  assert.equal([...f.timers.values()][0].delay, 30_000);
+  assert.equal(f.snapshots.at(-1).isPlaying, false);
+  f.events.get("progress")({ track: 1, trackId: "b", position: 0, duration: 180, buffered: 0 });
+  assert.equal(f.options.positionSecondsRef.current, 37);
+  await f.elapse();
+  assert.deepEqual(f.attempts, [["b", 37]]);
+  f.events.get("state")({ state: "buffering", trackId: "b" });
+  await f.elapse();
+  assert.equal(f.attempts.length, 1);
+  assert.equal(f.snapshots.at(-1).isBuffering, false);
+  assert.match(f.snapshots.at(-1).error, /Tap Play to retry/);
+  assert.deepEqual(f.calls.at(-1), ["pause"]);
+});
+
+test("a delayed buffer check cannot resume playback after Pause or a new selection", async () => {
+  for (const change of ["pause", "selection", "ready"]) {
+    const f = stalledNativeFixture();
+    f.events.get("state")({ state: "buffering" });
+    if (change === "pause") f.events.get("remote-pause")();
+    if (change === "selection") f.options.playRequestIdRef.current++;
+    if (change === "ready") f.state.state = "playing";
+    await f.elapse();
+    assert.equal(f.attempts.length, 0, change);
+  }
 });
 
 test("native progress applies the new duration before clamping its position", () => {
@@ -744,7 +800,7 @@ test("cached local files are revalidated while cached remote streams remain reus
     "./audioNativeQueueLane": { useAudioNativeQueueLane: () => ({}) },
     "./audioStartupReconcile": { useStartupPlaybackReconcile: noop },
     "./PlaybackEngine": { updatePlaybackEngineSnapshot: noop },
-    "./PlayerPlaybackResolver": { resolvePlaybackUrlWithDetails: async () => { resolutions++; return { url: null, qualityState: {} }; } },
+    "./PlayerPlaybackResolver": { resolvePlaybackUrlWithDetails: async song => { resolutions++; return { url: song.audioUrl ?? null, qualityState: {} }; } },
     "./smartAutoplayService": {}, "./ExpoAvAdapter": {},
   };
   const { usePlayerCoreState } = load("src/services/audio/usePlayerCoreState.ts", imports);
@@ -753,9 +809,12 @@ test("cached local files are revalidated while cached remote streams remain reus
   assert.equal(await core.resolvePlaybackUrlCached({ id: "a" }), null);
   assert.equal(resolutions, 1);
   assert.equal(core.streamUrlCache.current.has("a"), false);
-  core.streamUrlCache.current.set("b", "https://audio.example/b");
+  assert.equal(await core.resolvePlaybackUrlCached({ id: "b", audioUrl: "https://audio.example/b" }), "https://audio.example/b");
   assert.equal(await core.resolvePlaybackUrlCached({ id: "b" }), "https://audio.example/b");
-  assert.equal(resolutions, 1);
+  assert.equal(resolutions, 2, "fresh remote cache entries do not repeat resolution");
+  core.streamUrlCache.current.set("c", "https://audio.example/unknown-age");
+  assert.equal(await core.resolvePlaybackUrlCached({ id: "c" }), null);
+  assert.equal(resolutions, 3, "a cache entry without a freshness deadline must be revalidated");
 });
 
 test("a native error clears loading and publishes error plus paused intent", () => {

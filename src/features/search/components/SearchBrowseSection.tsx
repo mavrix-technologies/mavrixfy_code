@@ -104,6 +104,7 @@ export interface SearchRecentSectionProps {
   onScroll: (event: any) => void;
   onRecentSearchPress: (item: RecentSearchItem) => void;
   onRemoveRecentSearch: (id: string) => void;
+  onClearRecentSearches: () => void;
 }
 
 export const SearchRecentSection = React.memo(function SearchRecentSection({
@@ -113,6 +114,7 @@ export const SearchRecentSection = React.memo(function SearchRecentSection({
   onScroll,
   onRecentSearchPress,
   onRemoveRecentSearch,
+  onClearRecentSearches,
 }: SearchRecentSectionProps) {
   const renderItem = useCallback(
     ({ item }: { item: RecentSearchItem }) => (
@@ -165,6 +167,11 @@ export const SearchRecentSection = React.memo(function SearchRecentSection({
       data={recentSearches}
       keyExtractor={(item) => item.id}
       ListHeaderComponent={<Text style={styles.recentTitle}>Recent searches</Text>}
+      ListFooterComponent={recentSearches.length ? (
+        <Pressable accessibilityRole="button" style={styles.recentRow} onPress={onClearRecentSearches}>
+          <Text style={styles.recentLabel}>Clear recent searches</Text>
+        </Pressable>
+      ) : undefined}
       ListEmptyComponent={
         <View style={styles.recentEmpty}>
           <Ionicons name="search-outline" size={34} color={Colors.subtext} />

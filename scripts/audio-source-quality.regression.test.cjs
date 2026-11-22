@@ -4,14 +4,14 @@ const vm = require("node:vm");
 const test = require("node:test");
 const ts = require("typescript");
 
-function fixture({ local = null, download = null, entitled = true, network = "wifi", youtubeError = null } = {}) {
+function fixture({ local = null, download = null, entitled = true, network = "wifi", youtubeError = null, youtubeUrl, catalogUrl } = {}) {
   const resolutions = [], catalog = [];
   const module = { exports: {} };
   const original = "https://rr.googlevideo.com/videoplayback?expire=2000000000&sig=unchanged%2Bsignature";
   const deps = {
     "@/services/youtube/YouTubeMusic": {
       isYouTubeSong: song => song.source === "youtube",
-      resolveYouTubeStream: async (song, quality) => { resolutions.push(quality); if (youtubeError) throw youtubeError; return { url: original, bitrate: 130595, codec: "aac" }; },
+      resolveYouTubeStream: async (song, quality) => { resolutions.push(quality); if (youtubeError) throw youtubeError; return { url: youtubeUrl ?? original, bitrate: 130595, codec: "aac" }; },
       invalidateYouTubeStream() {}, peekYouTubeStream() {}, youTubeSongWithStream: song => song,
     },
     "@/services/spotify/SpotifyCatalogService": { isAudioPreviewUrl: () => false, resolveFullSongAudio: async () => null },
@@ -19,7 +19,7 @@ function fixture({ local = null, download = null, entitled = true, network = "wi
     "@/lib/downloads/downloadManager": { getLocalPlaybackUrl: async () => local, getSongDownload: async () => download },
     "@/lib/logger": { logger: { error() {} } },
     "@/lib/musicData": { convertJioSaavnSong: song => song, resolveAudioStreamWithQuality: (_, quality) => {
-      catalog.push(quality); return { url: "https://aac.saavncdn.com/original.mp4", bitrate: 320, qualityLabel: "320kbps", isFallback: false };
+      catalog.push(quality); return { url: catalogUrl ?? "https://aac.saavncdn.com/original.mp4", bitrate: 320, qualityLabel: "320kbps", isFallback: false };
     } },
     "@/lib/storage": { getSettings: async () => ({ streamingQuality: "high" }), isHighQualityEntitled: () => entitled },
     "@/utils/timeFormatters": { toDurationSeconds: value => Number(value) || 0 },
@@ -34,6 +34,34 @@ function fixture({ local = null, download = null, entitled = true, network = "wi
   return { ...module.exports, resolutions, catalog, original };
 }
 const song = { id: "youtube_abcdefghijk", source: "youtube", title: "Track", duration: 180 };
+
+test("playback rejects malformed URLs, unsupported schemes and provider pages disguised as audio", () => {
+  const f = fixture();
+  for (const value of ["not-a-url", "//cdn.example/track.mp3", "javascript:alert(1)", "data:audio/mpeg;base64,AAAA",
+    "ftp://cdn.example/track.mp3", "https://user:password@cdn.example/track.mp3", "https://cdn.example/a b.mp3",
+    "https://cdn.example/a\nb.mp3", "https://www.youtube.com/watch.mp3?v=abcdefghijk",
+    "https://open.spotify.com/track/song.mp3", "https://www.jiosaavn.com/song/test.mp3", "https://cdn.example/error.html"]) {
+    assert.equal(f.readAudioCandidate(value), "", value);
+  }
+  for (const value of ["https://cdn.example/track?sig=unchanged%2Bvalue", "http://localhost:8080/audio",
+    "file:///music/track.m4a", "file:///music/My Track.m4a", "content://media/external/audio/media/123", "/music/track.m4a", "/music/My Track.m4a",
+    "https://youtube.com.audio.example/track"]) assert.equal(f.readAudioCandidate(value), value);
+});
+
+test("provider resolution cannot return an unplayable page as a stream", async () => {
+  const youtube = fixture({ youtubeUrl: "https://youtube.com/watch?v=abcdefghijk" });
+  await assert.rejects(youtube.resolvePlaybackUrlWithDetails(song), /invalid audio source/i);
+  assert.equal(youtube.catalog.length, 0);
+  const catalog = fixture({ catalogUrl: "javascript:alert(1)" });
+  const result = await catalog.resolvePlaybackUrlWithDetails({ id: "catalog", source: "jiosaavn", downloadUrl: [{ quality: "320kbps" }] });
+  assert.equal(result.url, null);
+});
+
+test("saved High quality respects entitlement without an explicit quality override", async () => {
+  const f = fixture({ entitled: false });
+  await f.resolvePlaybackUrlWithDetails(song);
+  assert.deepEqual(f.resolutions, ["medium"]);
+});
 
 
 test("High uses the original source URL and reports its real AAC bitrate without upsampling claims", async () => {

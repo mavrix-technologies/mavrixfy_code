@@ -144,14 +144,16 @@ test('quality resolution retains metadata refreshed for the same active track', 
   assert.equal(t.snapshots.at(-1).currentSong.title,'Updated B');
 });
 
-test('invalidated stream resolution cannot refill cache or remove a newer pending resolution', async () => {
+function coreCacheFixture() {
   const requests = [];
+  let now = 2_000_000_000_000;
   const noop = () => {};
   const module = { exports:{} };
   vm.runInNewContext(ts.transpileModule(fs.readFileSync('src/services/audio/usePlayerCoreState.ts','utf8'), {
     compilerOptions:{ module:ts.ModuleKind.CommonJS, target:ts.ScriptTarget.ES2022 },
   }).outputText, {
     module,exports:module.exports,
+    Date: class extends Date { static now() { return now; } },
     require(name) {
       if (name.endsWith("YouTubeMusic")) return { isYouTubeSong: song => song.source === "youtube" || song.id?.startsWith("youtube_") };
       if (name.endsWith("ExpoAvAdapter")) return { prepareNextTrack: async () => {} };
@@ -174,6 +176,11 @@ test('invalidated stream resolution cannot refill cache or remove a newer pendin
     },
   });
   const core = module.exports.usePlayerCoreState({ TrackPlayer:null, State:{}, RepeatMode:{} });
+  return { core, requests, advance: ms => { now += ms; }, get now() { return now; } };
+}
+
+test('invalidated stream resolution cannot refill cache or remove a newer pending resolution', async () => {
+  const { core, requests } = coreCacheFixture();
   const old = core.resolvePlaybackUrlCached(songs[1]);
   core.streamResolveCache.current.clear();
   const latest = core.resolvePlaybackUrlCached(songs[1]);
@@ -183,4 +190,32 @@ test('invalidated stream resolution cannot refill cache or remove a newer pendin
   assert.equal(core.streamResolveCache.current.get('b'),latestPending);
   requests[1].resolve({ url:'latest-url', qualityState:{} }); await latest;
   assert.equal(core.streamUrlCache.current.get('b'),'latest-url');
+});
+
+test('Spotify-matched signed media is resolved again before its URL expires', async () => {
+  const f = coreCacheFixture(), song = { id: 'sp_track', source: 'spotify' };
+  const url = `https://rr.googlevideo.com/videoplayback?expire=${Math.floor(f.now / 1000) + 180}&sig=original%2Bvalue`;
+  const first = f.core.resolvePlaybackUrlCached(song);
+  f.requests[0].resolve({ url, qualityState: {} }); assert.equal(await first, url);
+  assert.equal(await f.core.resolvePlaybackUrlCached(song), url);
+  assert.equal(f.requests.length, 1, 'reuse a valid stream without another provider lookup');
+  f.advance(60_001);
+  const fresh = f.core.resolvePlaybackUrlCached(song);
+  assert.equal(f.requests.length, 2, 'refresh at the expiry safety margin');
+  const updated = `https://rr.googlevideo.com/videoplayback?expire=${Math.floor(f.now / 1000) + 3600}&sig=fresh%2Bvalue`;
+  f.requests[1].resolve({ url: updated, qualityState: {} });
+  assert.equal(await fresh, updated);
+  assert.equal(f.core.streamUrlCache.current.get(song.id), updated);
+});
+
+test('catalog URLs without an expiry are periodically resolved again and near-expiry results are not cached', async () => {
+  const f = coreCacheFixture(), song = { id: 'catalog', source: 'jiosaavn' };
+  const first = f.core.resolvePlaybackUrlCached(song);
+  f.requests[0].resolve({ url: 'https://cdn.example/original.mp4', qualityState: {} }); await first;
+  f.advance(5 * 60_000 + 1);
+  const second = f.core.resolvePlaybackUrlCached(song);
+  assert.equal(f.requests.length, 2);
+  f.requests[1].resolve({ url: `https://cdn.example/audio?expire=${Math.floor(f.now / 1000) + 60}`, qualityState: {} });
+  await second;
+  assert.equal(f.core.streamUrlCache.current.has(song.id), false);
 });

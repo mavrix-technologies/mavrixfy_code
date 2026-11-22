@@ -351,18 +351,40 @@ export async function addRecentlyPlayed(item: Omit<RecentlyPlayedItem, "lastPlay
 }
 
 export async function getSearchHistory(): Promise<SearchHistoryItem[]> {
-  const items = await getJSON<Partial<SearchHistoryItem>[]>(accountStorageKey(KEYS.SEARCH_HISTORY), []);
+  return readSearchHistory(accountStorageKey(KEYS.SEARCH_HISTORY));
+}
+
+async function readSearchHistory(storageKey: string): Promise<SearchHistoryItem[]> {
+  const items = await getJSON<Partial<SearchHistoryItem>[]>(storageKey, []);
   return normalizeSearchHistoryItems(items);
 }
 
+const searchHistoryWrites = new Map<string, Promise<SearchHistoryItem[]>>();
+
+function updateSearchHistory(patch: (items: SearchHistoryItem[]) => SearchHistoryItem[]): Promise<SearchHistoryItem[]> {
+  const key = accountStorageKey(KEYS.SEARCH_HISTORY);
+  const previous = searchHistoryWrites.get(key);
+  const write = (previous?.catch(() => undefined) ?? Promise.resolve()).then(async () => {
+    const next = patch(await readSearchHistory(key));
+    await setJSON(key, next);
+    return next;
+  }).finally(() => {
+    if (searchHistoryWrites.get(key) === write) searchHistoryWrites.delete(key);
+  });
+  searchHistoryWrites.set(key, write);
+  return write;
+}
+
+export function clearSearchHistory(): Promise<SearchHistoryItem[]> {
+  return updateSearchHistory(() => []);
+}
+
 export async function addSearchHistoryItem(labelValue: string): Promise<SearchHistoryItem[]> {
-  const storageKey = accountStorageKey(KEYS.SEARCH_HISTORY);
   const label = normalizeSearchLabel(labelValue);
   if (label.length < 2) {
     return getSearchHistory();
   }
 
-  const items = await getSearchHistory();
   const nextItem: SearchHistoryItem = {
     id: getSearchHistoryId(label),
     label,
@@ -370,20 +392,15 @@ export async function addSearchHistoryItem(labelValue: string): Promise<SearchHi
     lastSearched: Date.now(),
   };
   const nextKey = getSearchHistoryKey(nextItem);
-  const filtered = items.filter((item) => getSearchHistoryKey(item) !== nextKey);
-  const nextItems = [nextItem, ...filtered].slice(0, SEARCH_HISTORY_LIMIT);
-  await setJSON(storageKey, nextItems);
-  return nextItems;
+  return updateSearchHistory(items => [nextItem, ...items.filter(item => getSearchHistoryKey(item) !== nextKey)].slice(0, SEARCH_HISTORY_LIMIT));
 }
 
 export async function addSongSearchHistoryItem(song: Song): Promise<SearchHistoryItem[]> {
-  const storageKey = accountStorageKey(KEYS.SEARCH_HISTORY);
   const label = normalizeSearchLabel(song.title);
   if (!song.id || label.length < 2) {
     return getSearchHistory();
   }
 
-  const items = await getSearchHistory();
   const nextItem: SearchHistoryItem = {
     id: getSongSearchHistoryId(song),
     label,
@@ -394,18 +411,11 @@ export async function addSongSearchHistoryItem(song: Song): Promise<SearchHistor
     lastSearched: Date.now(),
   };
   const nextKey = getSearchHistoryKey(nextItem);
-  const filtered = items.filter((item) => getSearchHistoryKey(item) !== nextKey);
-  const nextItems = [nextItem, ...filtered].slice(0, SEARCH_HISTORY_LIMIT);
-  await setJSON(storageKey, nextItems);
-  return nextItems;
+  return updateSearchHistory(items => [nextItem, ...items.filter(item => getSearchHistoryKey(item) !== nextKey)].slice(0, SEARCH_HISTORY_LIMIT));
 }
 
 export async function removeSearchHistoryItem(id: string): Promise<SearchHistoryItem[]> {
-  const storageKey = accountStorageKey(KEYS.SEARCH_HISTORY);
-  const items = await getSearchHistory();
-  const nextItems = items.filter((item) => item.id !== id);
-  void setJSON(storageKey, nextItems);
-  return nextItems;
+  return updateSearchHistory(items => items.filter(item => item.id !== id));
 }
 
 function normalizeMiniPlayerSecondaryControl(value: unknown): MiniPlayerSecondaryControl {

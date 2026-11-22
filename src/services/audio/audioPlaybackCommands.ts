@@ -14,7 +14,7 @@ import { toDurationSeconds } from "@/utils/timeFormatters";
 import { playbackDuration, playbackPosition } from "./audioTimeline";
 import type { ToastAction } from "@/utils/globalToast";
 import type { NativePlaybackPlayer, State as AudioState } from "./NativePlaybackPlayer";
-import { useCallback,useEffect,type MutableRefObject } from "react";
+import { useCallback,useEffect,useRef,type MutableRefObject } from "react";
 
 interface UseAudioPlaybackCommandsOptions {
   currentSongRef: MutableRefObject<Song | null>;
@@ -107,6 +107,7 @@ export function useAudioPlaybackCommands({
   lastAutoplaySeedIdRef,
   sleepTimerRef,
 }: UseAudioPlaybackCommandsOptions) {
+  const seekGenerationRef = useRef(0);
   const playSong = useCallback(
     async (song: Song, requestedQueue?: Song[], startPositionSeconds?: number, sourceRequestId?: number) => {
       if (!song?.id) return;
@@ -656,9 +657,11 @@ export function useAudioPlaybackCommands({
   const seekTo = useCallback(
     async (progress: number) => {
       if (!Number.isFinite(progress)) return;
+      const seekGeneration = ++seekGenerationRef.current;
       const songId = currentSongRef.current?.id;
       const requestId = playRequestIdRef?.current;
-      const isCurrent = () => requestId === playRequestIdRef?.current && currentSongRef.current?.id === songId;
+      const isCurrent = () => seekGeneration === seekGenerationRef.current &&
+        requestId === playRequestIdRef?.current && currentSongRef.current?.id === songId;
       const native = TrackPlayer && isPlayerReady;
       let engineProgress: { position: number; duration: number } | undefined;
       if (native && typeof TrackPlayer.getProgress === "function") engineProgress = await TrackPlayer.getProgress().catch(() => undefined);

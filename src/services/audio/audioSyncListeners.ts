@@ -37,6 +37,7 @@ interface UseAudioSyncListenersOptions {
   pendingPlayRequestRef: MutableRefObject<PendingPlayRequest | null>;
   playRequestIdRef?: MutableRefObject<number>;
   positionSecondsRef: MutableRefObject<number>;
+  streamUrlCache: MutableRefObject<Map<string, string>>;
   setNativePosition: (pos: number) => void;
   setNativeDuration: (value: number | ((previous: number) => number), source?: "media" | "catalog") => void;
   setSeekOverride: (override: SeekOverride) => void;
@@ -75,6 +76,7 @@ export function useAudioSyncListeners({
   pendingPlayRequestRef,
   playRequestIdRef,
   positionSecondsRef,
+  streamUrlCache,
   setNativePosition,
   setNativeDuration,
   setSeekOverride,
@@ -91,15 +93,27 @@ export function useAudioSyncListeners({
   repeatModeRef,
 }: UseAudioSyncListenersOptions) {
   const sourceResolverRef = useRef<((event: SourceRequest) => Promise<void>) | null>(null);
+  const stallRetryRef = useRef<{ songId: string; position: number } | null>(null);
   // TrackPlayer native event handlers
   useEffect(() => {
     if (!isPlayerReady || !TrackPlayer) return;
 
+    let bufferTimer: ReturnType<typeof setTimeout> | undefined;
+    let bufferCheckPending = false;
+    let bufferGeneration = 0;
+    let nativeBuffering = false;
+    const stopBufferWatch = () => {
+      if (bufferTimer !== undefined) clearTimeout(bufferTimer);
+      bufferTimer = undefined;
+      bufferCheckPending = false;
+      bufferGeneration++;
+    };
     const pauseIntent = () => {
+      stopBufferWatch();
       desiredPlayStateRef.current = false;
       setIsPlaying(false);
       isPlayingRef.current = false;
-      updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false });
+      updatePlaybackEngineSnapshot({ desiredPlayState: false, isPlaying: false, isBuffering: false });
     };
     const playIntent = () => {
       desiredPlayStateRef.current = true;
@@ -108,6 +122,47 @@ export function useAudioSyncListeners({
       updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
     };
     let disposed = false;
+    const watchBuffering = () => {
+      const song = currentSongRef.current;
+      if (!song || bufferTimer !== undefined || bufferCheckPending || !desiredPlayStateRef.current) return;
+      const scope = getAccountScope();
+      const request = playRequestIdRef?.current;
+      const index = queueIndexRef.current;
+      const generation = bufferGeneration;
+      const isCurrent = () => !disposed && generation === bufferGeneration && isCurrentAccount(scope) &&
+        request === playRequestIdRef?.current && currentSongRef.current?.id === song.id &&
+        index === queueIndexRef.current && desiredPlayStateRef.current === true;
+      bufferTimer = setTimeout(() => {
+        bufferTimer = undefined;
+        if (!isCurrent()) return;
+        bufferCheckPending = true;
+        void TrackPlayer.getPlaybackSnapshot().then(async state => {
+          const track = state.queue[state.index];
+          if (!isCurrent() || state.state !== State.Buffering || !state.playWhenReady || !track?.url ||
+            track.id !== song.id || state.sourceRequest) return;
+          const position = Math.max(positionSecondsRef.current, Number.isFinite(state.position) ? state.position : 0, 0);
+          const retry = stallRetryRef.current;
+          if (retry?.songId !== song.id || position > retry.position + 5) {
+            stallRetryRef.current = { songId: song.id, position };
+            if (isYouTubeSong(song)) rejectYouTubeStream(song);
+            else streamUrlCache.current.delete(song.id);
+            if (isCurrent()) await playSongRef.current(song, queueRef.current, position);
+            return;
+          }
+          pauseIntent();
+          stallRetryRef.current = null;
+          playbackLoadingRef.current = false;
+          pendingPlayRequestRef.current = null;
+          setPlaybackLoading(false);
+          updatePlaybackEngineSnapshot({ isLoading: false, isBuffering: false, isReconnecting: false,
+            error: "Audio is still buffering. Tap Play to retry." });
+          // Keep the current source and position available for an explicit retry.
+          await TrackPlayer.pause();
+        }).catch(error => logger.warn("[Audio] Buffering recovery failed", error)).finally(() => {
+          if (generation === bufferGeneration) bufferCheckPending = false;
+        });
+      }, 30_000);
+    };
     const wantsSource = () => desiredPlayStateRef.current !== false;
     let lastSourceRequestId: number | undefined;
     const validatingSourceRequests = new Set<number>();
@@ -282,6 +337,8 @@ export function useAudioSyncListeners({
         const pending = pendingPlayRequestRef.current;
         if (pending && event?.trackId && event.trackId !== pending.songId) return;
         const nextState = event && typeof event === "object" && "state" in event ? event.state : event;
+        nativeBuffering = nextState === State.Buffering || nextState === State.Loading;
+        if (!nativeBuffering) stopBufferWatch();
 
         switch (nextState) {
           case State.Playing:
@@ -312,12 +369,18 @@ export function useAudioSyncListeners({
 
           case State.Buffering:
           case State.Loading:
-            updatePlaybackEngineSnapshot({ isBuffering: true });
+            if (desiredPlayStateRef.current === false) break;
+            setIsPlaying(false);
+            isPlayingRef.current = false;
+            updatePlaybackEngineSnapshot({ isPlaying: false, isBuffering: true });
+            watchBuffering();
             break;
         }
       }),
       subscribeTrackPlayerEvent(Event.PlaybackPlayWhenReadyChanged, (event: any) => {
         if (typeof event?.playWhenReady !== "boolean") return;
+        if (event.playWhenReady && nativeBuffering) watchBuffering();
+        if (!event.playWhenReady) stopBufferWatch();
         // Output stops during a system interruption without cancelling the
         // user's Play intent. The native interruption handler owns its resume.
         if (!event.playWhenReady && (event.reason === "interruption" || event.reason === "source-change")) return;
@@ -334,9 +397,7 @@ export function useAudioSyncListeners({
         desiredPlayStateRef.current = event.playWhenReady;
 
         if (event.playWhenReady) {
-          setIsPlaying(true);
-          isPlayingRef.current = true;
-          updatePlaybackEngineSnapshot({ desiredPlayState: true, isPlaying: true });
+          updatePlaybackEngineSnapshot({ desiredPlayState: true });
           return;
         }
 
@@ -352,6 +413,7 @@ export function useAudioSyncListeners({
           failedSong.id === error.trackId ||
           failedSong.id.replace(/^youtube_/, "") === String(error.trackId).replace(/^youtube_/, "");
         if (!isSameTrack) return;
+        stopBufferWatch();
         if (failedSong && peekYouTubeStream(failedSong, undefined, true)?.clientProfile === "JIOSAAVN") {
           // Startup is owned by the awaited Play command; subsequent errors
           // fall back once to YouTube at the same playback position.
@@ -412,7 +474,8 @@ export function useAudioSyncListeners({
           return;
         }
 
-        const pos = typeof event?.position === "number" ? event.position : 0;
+        const pos = event?.position;
+        if (typeof pos !== "number" || !Number.isFinite(pos) || pos < 0) return;
         if (pos > 0) {
           if (playbackLoadingRef.current) {
             playbackLoadingRef.current = false;
@@ -433,12 +496,23 @@ export function useAudioSyncListeners({
           setNativeDuration((prev) => (Math.abs(prev - dur) > 0.5 ? dur : prev));
         }
         // Install this source's duration before clamping its position.
-        setNativePosition(pos);
-        updatePlaybackProgress({ bufferedPositionMillis: typeof event.buffered === "number" && Number.isFinite(event.buffered)
-          ? Math.max(0, event.buffered) * 1000 : 0 });
+        // Native may briefly report zero while rebuilding the selected source.
+        // An explicit seek to zero already resets the shared position.
+        const position = nativeBuffering && pos === 0 ? positionSecondsRef.current : pos;
+        setNativePosition(position);
+        if (typeof event.buffered === "number" && Number.isFinite(event.buffered))
+          updatePlaybackProgress({ bufferedPositionMillis: Math.max(position, event.buffered) * 1000 });
 
       }),
-      subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, reconcileActiveTrack),
+      subscribeTrackPlayerEvent(Event.PlaybackActiveTrackChanged, event => {
+        const previousId = currentSongRef.current?.id;
+        reconcileActiveTrack(event);
+        if (previousId !== currentSongRef.current?.id || event?.externalSelection) {
+          stopBufferWatch();
+          stallRetryRef.current = null;
+          if (nativeBuffering) watchBuffering();
+        }
+      }),
       subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async (event?: { reason?: string; trackId?: string; index?: number }) => {
         const wantsPlayback = () => desiredPlayStateRef.current !== false;
         if (!wantsPlayback() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
@@ -524,6 +598,7 @@ export function useAudioSyncListeners({
     }
     return () => {
       disposed = true;
+      stopBufferWatch();
       if (sourceResolverRef.current === resolveSelectedSource) sourceResolverRef.current = null;
       unsubs.forEach((unsub) => unsub?.());
     };
