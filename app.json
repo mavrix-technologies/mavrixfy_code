@@ -3,7 +3,7 @@
     "name": "Mavrixfy",
     "slug": "mavrixfy",
     "scheme": "mavrixfy",
-    "version": "3.5.0",
+    "version": "3.5.1",
     "orientation": "portrait",
     "icon": "./assets/images/mavrixfy_icon.png",
     "userInterfaceStyle": "automatic",
@@ -12,8 +12,8 @@
       "supportsTablet": true,
       "icon": "./assets/images/mavrixfy_icon.png",
       "bundleIdentifier": "com.mavrixfy.app",
-      "buildNumber": "35001",
-      "runtimeVersion": "3.5.0-35001-sdk58-native-player3",
+      "buildNumber": "35003",
+      "runtimeVersion": "3.5.1-35003-sdk58-native-player3",
       "bitcode": false,
       "usesAppleSignIn": true,
       "infoPlist": {
@@ -64,8 +64,8 @@
     "android": {
       "scheme": "mavrixfy",
       "package": "com.mavrixfy.app",
-      "versionCode": 35002,
-      "runtimeVersion": "3.5.0-35002-sdk58-native-player4",
+      "versionCode": 35003,
+      "runtimeVersion": "3.5.1-35003-sdk58-native-player4",
       "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/mavrixfy_icon_foreground.png",
@@ -210,7 +210,7 @@
       "checkAutomatically": "ON_LOAD",
       "fallbackToCacheTimeout": 0
     },
-    "runtimeVersion": "3.5.0-35000-sdk58-native-player2",
+    "runtimeVersion": "3.5.1-35000-sdk58-native-player2",
     "extra": {
       "musicApiDomain": "mavrixfy-song-api.vercel.app",
       "firebaseApiKey": "AIzaSyBWgv_mE8ZAnG2kUJSacCOUgkbo1RxxSpE",
