@@ -13,7 +13,7 @@ import { toDurationSeconds } from "@/utils/timeFormatters";
 import { useEffect,useRef,type MutableRefObject } from "react";
 import { AppState } from "react-native";
 import type { NativePlaybackPlayer, State as AudioState, Event as AudioEvent } from "./NativePlaybackPlayer";
-type SourceRequest = { requestId?: number; index?: number; trackId?: string; position?: number };
+type SourceRequest = { requestId?: number; index?: number; trackId?: string; position?: number; refresh?: boolean };
 
 interface UseAudioSyncListenersOptions {
   setPlaybackQuality?: (update: (previous: PlaybackQualityState) => PlaybackQualityState) => void;
@@ -167,10 +167,15 @@ export function useAudioSyncListeners({
     let lastSourceRequestId: number | undefined;
     const validatingSourceRequests = new Set<number>();
     const resolveSelectedSource = async (event: SourceRequest) => {
+      const resolvingSameTrackInJs = Boolean(
+        playbackLoadingRef.current &&
+        pendingPlayRequestRef.current &&
+        pendingPlayRequestRef.current.songId === event.trackId
+      );
       if (disposed || typeof event.requestId !== "number" || !Number.isFinite(event.requestId) || event.requestId === lastSourceRequestId ||
         validatingSourceRequests.has(event.requestId) ||
         typeof event.index !== "number" || !Number.isInteger(event.index) || !event.trackId ||
-        !wantsSource() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
+        !wantsSource() || (!event.refresh && resolvingSameTrackInJs)) return;
       validatingSourceRequests.add(event.requestId);
       try {
       const scope = getAccountScope();
@@ -179,12 +184,21 @@ export function useAudioSyncListeners({
       const logicalIndex = queueIndexRef.current;
       const state = await TrackPlayer.getPlaybackSnapshot();
       const request = state.sourceRequest;
+      const sameJsResolving = Boolean(
+        playbackLoadingRef.current &&
+        pendingPlayRequestRef.current &&
+        pendingPlayRequestRef.current.songId === event.trackId
+      );
       if (disposed || !isCurrentAccount(scope) || revision !== playRequestIdRef?.current || selectedSong !== currentSongRef.current ||
-        logicalIndex !== queueIndexRef.current || !wantsSource() || playbackLoadingRef.current || pendingPlayRequestRef.current ||
+        logicalIndex !== queueIndexRef.current || !wantsSource() || (!event.refresh && sameJsResolving) ||
         request?.requestId !== event.requestId || request.index !== event.index || request.trackId !== event.trackId ||
-        state.index !== event.index || state.queue[state.index]?.id !== event.trackId || state.queue[state.index]?.url) return;
+        state.index !== event.index || state.queue[state.index]?.id !== event.trackId || (!event.refresh && state.queue[state.index]?.url)) return;
       const song = isNativeQueueSyncedRef?.current ? queueRef.current[event.index] : queueRef.current[logicalIndex];
       if (!song || song.id !== event.trackId || currentSongRef.current?.id !== song.id) return;
+      if (event.refresh) {
+        if (isYouTubeSong(song)) rejectYouTubeStream(song);
+        else streamUrlCache.current.delete(song.id);
+      }
       const position = typeof event.position === "number" && Number.isFinite(event.position) ? Math.max(0, event.position) : 0;
       lastSourceRequestId = event.requestId;
       try {
@@ -288,7 +302,6 @@ export function useAudioSyncListeners({
           });
 
           if (resolvedIndex >= 0) {
-            prefetchAdjacentTrackStreams(currentQ, resolvedIndex);
             if (triggerAutoplayAppend && sleepTimerRef.current?.mode !== "end-of-stack" && resolvedIndex >= currentQ.length - 2) {
               void triggerAutoplayAppend(targetSong, currentQ, () => sleepTimerRef.current?.mode !== "end-of-stack");
             }
@@ -513,12 +526,33 @@ export function useAudioSyncListeners({
           if (nativeBuffering) watchBuffering();
         }
       }),
-      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async (event?: { reason?: string; trackId?: string; index?: number }) => {
+      subscribeTrackPlayerEvent(Event.PlaybackQueueEnded, async (event?: { reason?: string; trackId?: string; index?: number; premature?: boolean; position?: number }) => {
         const wantsPlayback = () => desiredPlayStateRef.current !== false;
         if (!wantsPlayback() || playbackLoadingRef.current || pendingPlayRequestRef.current) return;
         if (event?.trackId && (event.trackId !== currentSongRef.current?.id ||
           (isNativeQueueSyncedRef?.current && typeof event.index === "number" && event.index !== queueIndexRef.current))) return;
         const endedSong = currentSongRef.current;
+        // Premature remote EOF must recover the interrupted song in place instead of advancing the queue.
+        if (event?.premature && endedSong) {
+          const resumePosition = Math.max(0, typeof event.position === "number" && Number.isFinite(event.position) ? event.position : positionSecondsRef.current);
+          const retry = stallRetryRef.current;
+          if (retry?.songId !== endedSong.id || resumePosition > retry.position + 5) {
+            stallRetryRef.current = { songId: endedSong.id, position: resumePosition };
+            if (isYouTubeSong(endedSong)) rejectYouTubeStream(endedSong);
+            else streamUrlCache.current.delete(endedSong.id);
+            void playSongRef.current(endedSong, queueRef.current, resumePosition);
+            return;
+          }
+          pauseIntent();
+          stallRetryRef.current = null;
+          playbackLoadingRef.current = false;
+          pendingPlayRequestRef.current = null;
+          setPlaybackLoading(false);
+          updatePlaybackEngineSnapshot({ isLoading: false, isBuffering: false, isReconnecting: false,
+            error: "Audio stream stopped early. Tap Play to retry." });
+          showPlaybackNotice("Audio stream stopped early. Tap Play to retry.");
+          return;
+        }
         const isStillEnded = () => currentSongRef.current === endedSong &&
           !playbackLoadingRef.current && !pendingPlayRequestRef.current;
         const nextQueuedSong = queueRef.current[queueIndexRef.current + 1];

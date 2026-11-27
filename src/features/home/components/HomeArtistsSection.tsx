@@ -127,6 +127,9 @@ export const HomeArtistsSection = memo(function HomeArtistsSection({
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         horizontal
+        nestedScrollEnabled
+        directionalLockEnabled
+        overScrollMode="never"
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}

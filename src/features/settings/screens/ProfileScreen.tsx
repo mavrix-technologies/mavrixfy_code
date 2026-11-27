@@ -80,23 +80,14 @@ function ProfileAccountSecurityGroup({
   );
 }
 
-export function ProfileScreen() {
-  const insets = useSafeAreaInsets();
-  const { push: routerPush, replace: routerReplace } = useRouter();
-  const { section: sectionParam } = useLocalSearchParams<{ section?: string }>();
-  const section = typeof sectionParam === "string" && sectionParam in PROFILE_SECTIONS
-    ? sectionParam as ProfileSection
-    : null;
+function useProfileSettingsController() {
+  const { replace: routerReplace, push: routerPush } = useRouter();
   const { user, isAuthenticated, logout } = useAuth();
   const { changeStreamingQuality } = usePlayerActions();
   const { updatePreferences } = useDownloads();
 
-  const topInset = Platform.OS === "web" ? 20 : insets.top;
-  const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
-
   const [checkingStoreUpdate, setCheckingStoreUpdate] = useState(false);
   const [changingQuality, setChangingQuality] = useState<AppSettings["streamingQuality"] | null>(null);
-
   const [settings, setSettings] = useState<AppSettings>({
     streamingQuality: "medium",
     highQualityUnlocked: false,
@@ -115,33 +106,45 @@ export function ProfileScreen() {
     gapless: true,
     normalizeVolume: false,
     ambientBackdropEnabled: false,
-
+    preferredLanguages: ["hindi", "punjabi"],
   });
 
   useEffect(() => {
-    let mounted = true;
+    const controller = new AbortController();
     void Promise.all([getSettings(), hasSeenNewFeatures()]).then(([s, seen]) => {
-      if (!mounted) return;
+      if (controller.signal.aborted) return;
       queueMicrotask(() => {
+        if (controller.signal.aborted) return;
         setSettings(s);
         setHapticsPreference(Boolean(s.hapticsEnabled));
         if (!seen) void markNewFeaturesSeen();
       });
     });
-    return () => {
-      mounted = false;
-    };
+    return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (Array.isArray(user?.preferredLanguages) && user.preferredLanguages.length > 0) {
+      const controller = new AbortController();
+      void import("@/lib/languagePreferences")
+        .then(({ syncProfileLanguagesToLocal }) => syncProfileLanguagesToLocal(user.preferredLanguages))
+        .then((synced) => {
+          if (!controller.signal.aborted && synced) {
+            setSettings((current) => ({ ...current, preferredLanguages: synced }));
+          }
+        })
+        .catch(() => {});
+      return () => controller.abort();
+    }
+  }, [user?.preferredLanguages]);
 
   useFocusEffect(
     useCallback(() => {
-      let active = true;
+      const controller = new AbortController();
       void getSettings().then((s) => {
-        if (active) setSettings(s);
+        if (!controller.signal.aborted) setSettings(s);
       });
-      return () => {
-        active = false;
-      };
+      return () => controller.abort();
     }, [])
   );
 
@@ -151,6 +154,21 @@ export function ProfileScreen() {
 
     if (typeof partial.hapticsEnabled === "boolean") {
       setHapticsPreference(partial.hapticsEnabled);
+    }
+    if (typeof partial.normalizeVolume === "boolean") {
+      void import("@/services/audio/NativePlaybackPlayer")
+        .then(({ setNativeNormalizeVolume }) => setNativeNormalizeVolume(Boolean(partial.normalizeVolume)))
+        .catch(() => {});
+    }
+    if (Array.isArray(partial.preferredLanguages)) {
+      void import("@/lib/languagePreferences")
+        .then(({ savePreferredLanguages }) => savePreferredLanguages(partial.preferredLanguages!, user?.id))
+        .catch(() => {});
+    }
+    if (typeof partial.originalSoundEnabled === "boolean") {
+      void import("@/services/audio/audioEqualizer")
+        .then(({ previewOriginalSound }) => previewOriginalSound(Boolean(partial.originalSoundEnabled)))
+        .catch(() => Alert.alert("Playback mode unavailable", "Rebuild or update the installed app to use Original sound."));
     }
     if (partial.miniPlayerSecondaryControl) {
       setMiniPlayerSecondaryControlPreference(partial.miniPlayerSecondaryControl);
@@ -165,7 +183,7 @@ export function ProfileScreen() {
         Alert.alert("Settings not saved", "Could not update download preferences. Please try again.");
       }
     }
-  }, [updatePreferences]);
+  }, [updatePreferences, user?.id]);
 
   const handleQualityChange = useCallback(
     async (value: AppSettings["streamingQuality"]) => {
@@ -266,8 +284,49 @@ export function ProfileScreen() {
     );
   }, []);
 
-  const appVersion = getInstalledAppVersion();
-  const buildNumber = getInstalledBuildNumber();
+  return {
+    user,
+    isAuthenticated,
+    routerPush,
+    routerReplace,
+    settings,
+    checkingStoreUpdate,
+    changingQuality,
+    updateSettings,
+    handleQualityChange,
+    handleLogout,
+    handleCheckStoreUpdate,
+    handleClearCache,
+    appVersion: getInstalledAppVersion(),
+    buildNumber: getInstalledBuildNumber(),
+  };
+}
+
+export function ProfileScreen() {
+  const insets = useSafeAreaInsets();
+  const { section: sectionParam } = useLocalSearchParams<{ section?: string }>();
+  const section = typeof sectionParam === "string" && sectionParam in PROFILE_SECTIONS
+    ? sectionParam as ProfileSection
+    : null;
+  const {
+    user,
+    isAuthenticated,
+    routerPush,
+    routerReplace,
+    settings,
+    checkingStoreUpdate,
+    changingQuality,
+    updateSettings,
+    handleQualityChange,
+    handleLogout,
+    handleCheckStoreUpdate,
+    handleClearCache,
+    appVersion,
+    buildNumber,
+  } = useProfileSettingsController();
+
+  const topInset = Platform.OS === "web" ? 20 : insets.top;
+  const bottomInset = Platform.OS === "web" ? 20 : insets.bottom;
   const openSection = (target: ProfileSection) => routerPush(`/profile/${target}` as any);
 
   return (

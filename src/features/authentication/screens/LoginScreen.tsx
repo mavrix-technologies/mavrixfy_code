@@ -6,6 +6,9 @@ import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 import { getGoogleMobileIdToken } from "@/lib/googleAuth";
 import { triggerImpact,triggerNotification } from "@/lib/haptics";
 import { openPrivacyPolicy,openTermsOfService } from "@/lib/legal";
+import { savePreferredLanguages } from "@/lib/languagePreferences";
+import { DEFAULT_PREFERRED_LANGUAGES } from "@/lib/musicLanguages";
+import { MusicLanguagePicker } from "@/components/MusicLanguagePicker";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import Constants from "expo-constants";
 import * as Haptics from "expo-haptics";
@@ -409,6 +412,7 @@ function useLoginFormState() {
   const [, setAppleAvailable] = useState(false);
   const [resetPasswordLoading, setResetPasswordLoading] = useState(false);
   const [focusedField, setFocusedField] = useState<"name" | "email" | "password" | null>(null);
+  const [selectedLanguages, setSelectedLanguages] = useState<string[]>([...DEFAULT_PREFERRED_LANGUAGES]);
 
   const isSignup = mode === "signup";
 
@@ -444,7 +448,8 @@ function useLoginFormState() {
     setLoading(true);
     try {
       if (isSignup) {
-        await register(email.trim(), password, fullName.trim());
+        await register(email.trim(), password, fullName.trim(), selectedLanguages);
+        await savePreferredLanguages(selectedLanguages).catch(() => {});
       } else {
         await login(email.trim(), password);
       }
@@ -485,6 +490,9 @@ function useLoginFormState() {
       setGoogleLoading(true);
       try {
         await signInWithGoogle();
+        if (isSignup) {
+          await savePreferredLanguages(selectedLanguages).catch(() => {});
+        }
         routerReplace("/(tabs)");
       } catch (error: any) {
         Alert.alert("Error", error.message || "Google Sign-In failed");
@@ -498,6 +506,9 @@ function useLoginFormState() {
     try {
       const idToken = await getGoogleMobileIdToken("Google Sign-In");
       await signInWithGoogleCredential(idToken);
+      if (isSignup) {
+        await savePreferredLanguages(selectedLanguages).catch(() => {});
+      }
       void triggerNotification(Haptics.NotificationFeedbackType.Success);
       routerReplace("/(tabs)");
     } catch (error: any) {
@@ -533,6 +544,9 @@ function useLoginFormState() {
       } else {
         const credential = await getAppleMobileCredential("Apple Sign-In");
         await signInWithAppleCredential(credential);
+      }
+      if (isSignup) {
+        await savePreferredLanguages(selectedLanguages).catch(() => {});
       }
       void triggerNotification(Haptics.NotificationFeedbackType.Success);
       routerReplace("/(tabs)");
@@ -597,6 +611,8 @@ function useLoginFormState() {
     resetPasswordLoading,
     focusedField,
     setFocusedField,
+    selectedLanguages,
+    setSelectedLanguages,
     handleSubmit,
     handleGoogleSignIn,
     handleAppleSignIn,
@@ -687,6 +703,18 @@ function LoginScreenView() {
               resetPasswordLoading={auth.resetPasswordLoading}
               onForgotPassword={auth.handleForgotPassword}
             />
+
+            {auth.isSignup ? (
+              <View style={styles.languagePickerWrap}>
+                <MusicLanguagePicker
+                  compact
+                  selected={auth.selectedLanguages}
+                  onChange={auth.setSelectedLanguages}
+                  title="Select your music languages"
+                  subtitle="Tailors India search results, suggestions, and Home feed"
+                />
+              </View>
+            ) : null}
 
             <AuthSubmitActions
               isSignup={auth.isSignup}

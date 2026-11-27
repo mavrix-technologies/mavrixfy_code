@@ -15,7 +15,8 @@ export function buildHomeSections(
   sections: YouTubeHomeSection[],
   jioSections: HomeSectionItem[],
   explore: YouTubeHomeSection[] = [],
-  includeCatalog?: boolean
+  includeCatalog?: boolean,
+  preferredLanguages?: readonly string[]
 ): HomeListItem[] {
 
   if (category === "Recently Played" || !youtubeEnabled) return jioSections;
@@ -48,8 +49,29 @@ export function buildHomeSections(
     playlists: [...new Map(releaseShelves.flatMap((section) => section.playlists).map((item) => [item.id, item])).values()],
   };
 
+  const REGIONAL_LANGUAGE_TERMS = [
+    "tamil",
+    "telugu",
+    "marathi",
+    "bengali",
+    "kannada",
+    "malayalam",
+    "bhojpuri",
+    "gujarati",
+  ] as const;
+  const preferredLangSet = new Set(
+    (Array.isArray(preferredLanguages) && preferredLanguages.length > 0
+      ? preferredLanguages
+      : ["hindi", "punjabi"]
+    )
+      .map((lang) => String(lang || "").trim().toLowerCase())
+      .filter(Boolean)
+  );
+  const blockedRegionalTerms = REGIONAL_LANGUAGE_TERMS.filter((lang) => !preferredLangSet.has(lang));
+  const blockedRegionalRegex =
+    blockedRegionalTerms.length > 0 ? new RegExp(`\\b(${blockedRegionalTerms.join("|")})\\b`, "i") : null;
   const isExcludedLanguage = (text: string) =>
-    /\b(tamil|telugu|marathi|bengali|kannada|malayalam|bhojpuri|gujarati)\b/i.test(text);
+    blockedRegionalRegex ? blockedRegionalRegex.test(text) : false;
 
   const seenDiscoveryIds = new Set<string>();
   const discovery = youtubeEnabled

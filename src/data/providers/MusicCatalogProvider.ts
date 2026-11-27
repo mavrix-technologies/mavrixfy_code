@@ -1,4 +1,5 @@
 import { shuffleArray } from "@/lib/arrayUtils";
+import { rankItemsByIndiaAndLanguages } from "@/lib/musicLanguages";
 import { fetchWithTimeout } from "@/utils/asyncUtils";
 import {
   getCategoryCache,
@@ -314,17 +315,19 @@ export function mixForFeed(
 
 function buildDayFingerprint(context: AutoRefreshContext): string {
   const day = new Date(context.timestamp).toDateString();
-  return `v8|${context.isWeekend ? "weekend" : "weekday"}|${context.languageBias}|${day}`;
+  const langKey = context.preferredLanguages?.length ? context.preferredLanguages.join(",") : context.languageBias;
+  return `v9|IN|${context.isWeekend ? "weekend" : "weekday"}|${langKey}|${day}`;
 }
 
 export async function getHomeCatalogCategories(options?: {
   limit?: number;
   categoryIds?: string[];
   forceRefresh?: boolean;
+  preferredLanguages?: readonly string[];
 }): Promise<CatalogCategoryData[]> {
   const limit = Math.max(1, options?.limit ?? 10);
   const forceRefresh = options?.forceRefresh ?? false;
-  const context = getCurrentRefreshContext();
+  const context = getCurrentRefreshContext(new Date(), options?.preferredLanguages);
   const dayFingerprint = buildDayFingerprint(context);
 
   const categoryIdFilter = new Set(options?.categoryIds ?? []);
@@ -732,7 +735,10 @@ export function getSpotifyMoodsCategory(shuffle = true, freshList: CatalogPlayli
   };
 }
 
-export async function getAllSpotifyCategories(forceRefresh = false): Promise<CatalogCategoryData[]> {
+export async function getAllSpotifyCategories(
+  forceRefresh = false,
+  preferredLanguages?: readonly string[]
+): Promise<CatalogCategoryData[]> {
   let freshList: CatalogPlaylistResult[] = [];
   try {
     const fetched = await fetchCategoryFast("spotify", 30, forceRefresh);
@@ -744,11 +750,17 @@ export async function getAllSpotifyCategories(forceRefresh = false): Promise<Cat
   const freshFlagship = freshList.filter((p) => FLAGSHIP_PLAYLIST_IDS.has(p.id));
   const combinedFlagship = dedupeByPlaylistId([...freshFlagship, ...SPOTIFY_FLAGSHIP_PRESETS])
     .filter((p) => FLAGSHIP_PLAYLIST_IDS.has(p.id));
+  const rankedFlagship = rankItemsByIndiaAndLanguages(
+    combinedFlagship,
+    "",
+    preferredLanguages,
+    (playlist) => ({ title: playlist.name, subtitle: playlist.description, language: playlist.language })
+  );
 
   const flagshipCategory: CatalogCategoryData = {
     id: "spotify",
     title: "Top Hits & Trending",
-    results: forceRefresh ? shuffleCatalogItems(combinedFlagship) : combinedFlagship,
+    results: forceRefresh ? shuffleCatalogItems(rankedFlagship) : rankedFlagship,
     isFresh: freshFlagship.length > 0,
   };
 

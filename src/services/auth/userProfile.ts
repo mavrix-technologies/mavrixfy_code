@@ -8,21 +8,31 @@ export interface AppUser {
   name: string;
   picture: string;
   isAdmin: boolean;
+  preferredLanguages?: string[];
+  country?: string;
 }
 
 interface ProfileDetails {
   fullName?: string;
   email?: string;
   appleUserId?: string;
+  preferredLanguages?: string[];
 }
 
 export function toAppUser(user: User, data: Record<string, unknown> = {}): AppUser {
+  const langs = Array.isArray(data.preferredLanguages)
+    ? data.preferredLanguages.map(String).filter(Boolean)
+    : Array.isArray(data.preferredGenres)
+    ? data.preferredGenres.map(String).filter(Boolean)
+    : undefined;
   return {
     id: user.uid,
     email: user.email || "",
     name: String(data.fullName || data.displayName || user.displayName || ""),
     picture: String(data.imageUrl || data.photoURL || user.photoURL || ""),
     isAdmin: data.isAdmin === true || data.admin === true || String(data.role || "").toLowerCase() === "admin",
+    ...(langs?.length ? { preferredLanguages: langs } : {}),
+    ...(typeof data.country === "string" && data.country ? { country: data.country } : {}),
   };
 }
 
@@ -45,7 +55,8 @@ export async function syncUserProfile(user: User, details: ProfileDetails = {}):
         photoURL: user.photoURL || null,
         provider: user.providerData[0]?.providerId || "password",
         ...(details.appleUserId ? { appleUserId: details.appleUserId } : {}),
-        onboardingCompleted: false,
+        ...(details.preferredLanguages?.length ? { preferredLanguages: details.preferredLanguages, country: "IN" } : {}),
+        onboardingCompleted: Boolean(details.preferredLanguages?.length),
         schemaVersion: 2,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -58,6 +69,9 @@ export async function syncUserProfile(user: User, details: ProfileDetails = {}):
         ...(!data.fullName && name ? { fullName: name } : {}),
         ...(!data.displayName && name ? { displayName: name } : {}),
         ...(!data.appleUserId && details.appleUserId ? { appleUserId: details.appleUserId } : {}),
+        ...(!Array.isArray(data.preferredLanguages) && details.preferredLanguages?.length
+          ? { preferredLanguages: details.preferredLanguages, country: "IN", onboardingCompleted: true }
+          : {}),
         lastLoginAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
       });

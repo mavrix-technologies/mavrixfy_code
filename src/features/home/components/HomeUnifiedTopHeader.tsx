@@ -6,7 +6,7 @@ import { type FestivalThemeConfig } from "@/services/festivalThemeService";
 import * as Haptics from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import React,{ useCallback, useMemo, type ReactNode } from "react";
+import React,{ useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import {
 Platform,
 StyleSheet,
@@ -45,6 +45,7 @@ interface HomeUnifiedTopHeaderProps {
   topInset: number;
   selectedCategory: MavrixfyCategory;
   onSelectCategory: (category: MavrixfyCategory) => void;
+  categoryProgress?: number | SharedValue<number>;
   scrollY?: number | SharedValue<number>;
   themeConfig?: FestivalThemeConfig;
   announcement?: ReactNode;
@@ -56,11 +57,13 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
   topInset,
   selectedCategory,
   onSelectCategory,
+  categoryProgress,
   scrollY = 0,
   themeConfig,
   announcement,
   announcementHeight = 0,
 }: HomeUnifiedTopHeaderProps) {
+  const categoryListRef = useRef<FlatList<MusicCategoryItem> | null>(null);
   const router = useRouter();
   const { user, isAuthenticated } = useAuth();
   const isIOS = Platform.OS === "ios";
@@ -194,14 +197,34 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
     return MAVRIXFY_MUSIC_CATEGORIES;
   }, [themeConfig?.customCategories, themeConfig?.menuLabels]);
 
+  useEffect(() => {
+    const activeIndex = categoriesData.findIndex((item) => item.id === selectedCategory);
+    if (activeIndex < 0) return;
+    categoryListRef.current?.scrollToIndex?.({
+      index: activeIndex,
+      animated: true,
+      viewPosition: 0.5,
+    });
+  }, [categoriesData, selectedCategory]);
+
+  const handleCategoryScrollFailed = useCallback(
+    (info: { index: number; averageItemLength: number }) => {
+      const approxOffset = Math.max(0, info.averageItemLength * info.index - 80);
+      categoryListRef.current?.scrollToOffset?.({ offset: approxOffset, animated: true });
+    },
+    []
+  );
+
   const renderCategoryItem = useCallback(
-    ({ item }: ListRenderItemInfo<MusicCategoryItem>) => {
+    ({ item, index }: ListRenderItemInfo<MusicCategoryItem>) => {
       const active = selectedCategory === item.id;
 
       return (
         <CategoryTabItem
           item={item}
           active={active}
+          index={index}
+          categoryProgress={categoryProgress}
           isIOS={isIOS}
           isFestival={isFestival}
           scrollY={categoryScrollY}
@@ -215,6 +238,7 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
     },
     [
       handleCategoryPress,
+      categoryProgress,
       isFestival,
       isIOS,
       festiveActiveIconColor,
@@ -283,10 +307,11 @@ export const HomeUnifiedTopHeader = React.memo(function HomeUnifiedTopHeader({
         />
 
         {/* A small native scroll row keeps every menu option mounted without clipping. */}
-        <View style={styles.menuRailRow} pointerEvents="box-none">
-          <FlatList data={categoriesData} renderItem={renderCategoryItem} keyExtractor={categoryKey}
-            horizontal showsHorizontalScrollIndicator={false} bounces={false}
+        <View style={styles.menuRailRow} pointerEvents="box-none" accessibilityRole="tablist">
+          <FlatList ref={categoryListRef} data={categoriesData} renderItem={renderCategoryItem} keyExtractor={categoryKey}
+            horizontal nestedScrollEnabled showsHorizontalScrollIndicator={false} bounces={false}
             overScrollMode="never" removeClippedSubviews={false} contentContainerStyle={styles.menuScrollContent}
+            onScrollToIndexFailed={handleCategoryScrollFailed}
             initialNumToRender={categoriesData.length} maxToRenderPerBatch={categoriesData.length} />
         </View>
       </Animated.View>

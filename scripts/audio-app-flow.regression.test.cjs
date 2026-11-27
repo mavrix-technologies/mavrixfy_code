@@ -994,3 +994,69 @@ test("native JioSaavn terminal error retains position and falls back; paused int
     assert.equal(f.options.positionSecondsRef.current, 37);
   }
 });
+
+test("premature native queue end recovers the interrupted track instead of auto-changing songs", async () => {
+  const f = fixture({ activeIndex: 0, youtube: true });
+  const reloaded = [];
+  f.options.playSongRef.current = (...args) => reloaded.push(args);
+  f.options.desiredPlayStateRef.current = true;
+  f.listen();
+  await f.events.get("ended")({ premature: true, position: 62, duration: 210, trackId: "a", index: 0 });
+  assert.equal(reloaded.length, 1);
+  assert.equal(reloaded[0][0].id, "a");
+  assert.equal(reloaded[0][2], 62);
+  await f.events.get("ended")({ premature: true, position: 62, duration: 210, trackId: "a", index: 0 });
+  assert.equal(reloaded.length, 1);
+  assert.equal(f.options.desiredPlayStateRef.current, false);
+  assert.match(f.snapshots.at(-1).error, /Tap Play to retry/);
+});
+
+test("refresh source-required recovers mid-song stream errors even if an earlier loading flag was stale", async () => {
+  const f = fixture({ youtube: true, preferredSource: true });
+  const request = { requestId: 9, index: 1, trackId: "b", position: 48, refresh: true };
+  f.options.TrackPlayer.getPlaybackSnapshot = async () => ({
+    queue: f.songs,
+    index: 1,
+    position: 48,
+    duration: 180,
+    sourceRequest: request,
+  });
+  const resolved = [];
+  f.options.playSongRef.current = async (...args) => resolved.push(args);
+  f.options.TrackPlayer.finishSourceRequest = async () => {};
+  f.listen();
+  await tick();
+  f.options.desiredPlayStateRef.current = true;
+  f.options.playbackLoadingRef.current = true;
+  f.options.pendingPlayRequestRef.current = null;
+  f.events.get("source-required")(request);
+  await tick(); await tick();
+  assert.equal(f.calls.filter(([name]) => name === "reject-source").length, 1);
+  assert.equal(resolved.length, 1);
+  assert.equal(resolved[0][0].id, "b");
+  assert.equal(resolved[0][2], 48);
+  assert.equal(resolved[0][3], 9);
+});
+
+test("superseded song selection aborts the previous resolution signal", async () => {
+  const signals = [];
+  const streams = new Map();
+  const f = fixture({
+    resolveUrl: (song, _q, signal) => {
+      signals.push({ id: song.id, signal });
+      const d = deferred();
+      streams.set(song.id, d);
+      return d.promise;
+    },
+  });
+  const first = f.commands.playSong(f.songs[0], f.songs);
+  await tick();
+  assert.equal(signals[0].signal.aborted, false);
+  const second = f.commands.playSong(f.songs[1], f.songs);
+  assert.equal(signals[0].signal.aborted, true);
+  assert.equal(signals[1].signal.aborted, false);
+  streams.get("b").resolve("https://audio.example/b");
+  streams.get("a").resolve("https://audio.example/a");
+  await Promise.all([first, second]);
+  assert.equal(f.options.currentSongRef.current.id, "b");
+});

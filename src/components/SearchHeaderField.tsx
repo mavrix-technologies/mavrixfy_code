@@ -87,6 +87,8 @@ export const SearchHeaderField = memo(
             clearButtonMode={Platform.OS === "ios" ? "while-editing" : "never"}
             keyboardAppearance="dark"
             selectionColor={Colors.primary}
+            accessibilityLabel="Search songs, artists, albums, or playlists"
+            accessibilityHint="Enter a search query"
           />
           {Platform.OS !== "ios" && value.length > 0 ? (
             <Pressable

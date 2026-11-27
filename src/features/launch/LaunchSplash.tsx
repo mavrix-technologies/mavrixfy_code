@@ -116,7 +116,13 @@ export function LaunchSplash({ ready, onComplete }: { ready: boolean; onComplete
       accessible accessibilityRole="progressbar" accessibilityLabel="Mavrixfy is starting"
       style={[styles.overlay, overlayStyle]}>
       <View style={styles.logo} onLayout={markLogoReady} testID="launch-logo" accessible={false}>
-        {bars.map((_, index) => <LaunchBar key={index} index={index} clock={clock} />)}
+        {bars.map((bar, index) => (
+          <LaunchBar
+            key={`${bar.x}-${bar.y}-${bar.width}-${bar.height}`}
+            index={index}
+            clock={clock}
+          />
+        ))}
       </View>
     </Animated.View>
   );

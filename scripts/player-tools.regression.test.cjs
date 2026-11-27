@@ -22,6 +22,7 @@ function nodes(tree) {
   if (Array.isArray(tree)) return tree.flatMap(nodes);
   return tree && typeof tree === 'object' ? [tree, ...nodes(tree.props?.children)] : [];
 }
+const infoControl = tree => nodes(tree).find(node => node.type === 'Pressable');
 
 test('playback status distinguishes buffering, reconnecting and verification failures', () => {
   const { playbackStatusLabel: label } = load('src/services/audio/playbackStatusLabel.ts', {});
@@ -37,6 +38,7 @@ test('admin quality UI reports source bitrate without inventing an unknown bitra
   let status = null;
   const quality = { requested: 'high', actualBitrate: 128, qualityLabel: '128kbps', codec: 'aac' };
   const { PlaybackInfo } = load('src/features/player/components/PlaybackInfo.tsx', {
+    './AudioDiagnosticsPanel': { AudioDiagnosticsPanel: 'AudioDiagnosticsPanel' },
     react, 'react-native': native, '@/contexts/PlayerContextDefs': { usePlayerActions: () => ({ playbackQuality: quality }) },
     '@/contexts/AuthContext': { useAuth: () => ({ user: { isAdmin: true } }) },
     '@/lib/providerFilter': { getSongProvider: () => 'youtube' },
@@ -46,20 +48,22 @@ test('admin quality UI reports source bitrate without inventing an unknown bitra
   const text = () => nodes(PlaybackInfo({})).filter(node => node.type === 'Text').map(node => node.props.children[0]);
   assert.deepEqual(text(), ['YouTube Music · High requested · AAC · 128 kbps']);
   status = 'Loading…'; assert.deepEqual(text(), ['YouTube Music · Loading…']);
-  assert.match(PlaybackInfo({}).props.accessibilityLabel, /High requested · bitrate unavailable/);
+  assert.match(infoControl(PlaybackInfo({})).props.accessibilityLabel, /High requested · bitrate unavailable/);
   status = null; quality.actualBitrate = 0; quality.codec = undefined;
   assert.deepEqual(text(), ['YouTube Music · High requested · bitrate unavailable']);
   quality.qualityLabel = 'Offline'; quality.actualBitrate = 192;
   assert.deepEqual(text(), ['YouTube Music · Offline · 192 kbps']);
   quality.codec = 'opus'; status = 'Buffering…';
-  assert.match(PlaybackInfo({}).props.accessibilityLabel, /Offline · OPUS · 192 kbps/);
+  assert.match(infoControl(PlaybackInfo({})).props.accessibilityLabel, /Offline · OPUS · 192 kbps/);
 });
 
-test('public and guest playback hide provider and quality details, including accessibility labels', () => {
+test('public playback keeps source details out of the default label and opens diagnostics on request', () => {
   let user = null;
+  let detailsOpen = false;
   const engine = { currentSong: { source: 'youtube' }, isLoading: false, isBuffering: false, isReconnecting: false, error: null };
   const { PlaybackInfo } = load('src/features/player/components/PlaybackInfo.tsx', {
-    react, 'react-native': native,
+    './AudioDiagnosticsPanel': { AudioDiagnosticsPanel: 'AudioDiagnosticsPanel' },
+    react: { ...react, useState: () => [detailsOpen, value => { detailsOpen = value; }] }, 'react-native': native,
     '@/contexts/AuthContext': { useAuth: () => ({ user }) },
     '@/contexts/PlayerContextDefs': { usePlayerActions: () => ({ playbackQuality: {
       requested: 'high', actualBitrate: 320, codec: 'aac', qualityLabel: '320kbps',
@@ -73,19 +77,25 @@ test('public and guest playback hide provider and quality details, including acc
     for (const source of ['youtube', 'spotify', 'jiosaavn']) {
       engine.currentSong.source = source;
       const idle = PlaybackInfo({});
-      assert.equal(idle.props.accessibilityLabel, 'Mavrixfy Music');
+      assert.equal(infoControl(idle).props.accessibilityLabel, 'Mavrixfy Music. Open audio details');
       assert.doesNotMatch(JSON.stringify(idle), /YouTube|Spotify|JioSaavn|requested|kbps|AAC/i);
       engine.isLoading = true;
       const loading = PlaybackInfo({});
-      assert.equal(loading.props.accessibilityLabel, 'Loading…');
+      assert.equal(infoControl(loading).props.accessibilityLabel, 'Loading…. Open audio details');
       assert.doesNotMatch(JSON.stringify(loading), /YouTube|Spotify|JioSaavn|requested|kbps|AAC/i);
       engine.isLoading = false;
     }
   }
   user = { isAdmin: true };
-  assert.match(PlaybackInfo({}).props.accessibilityLabel, /High requested · AAC · 320 kbps/);
+  assert.match(infoControl(PlaybackInfo({})).props.accessibilityLabel, /High requested · AAC · 320 kbps/);
   user = null;
-  assert.equal(PlaybackInfo({}).props.accessibilityLabel, 'Mavrixfy Music');
+  assert.equal(infoControl(PlaybackInfo({})).props.accessibilityLabel, 'Mavrixfy Music. Open audio details');
+  assert.equal(nodes(PlaybackInfo({})).some(node => node.type === 'AudioDiagnosticsPanel'), false);
+  infoControl(PlaybackInfo({})).props.onPress();
+  const panel = nodes(PlaybackInfo({})).find(node => node.type === 'AudioDiagnosticsPanel');
+  assert.ok(panel, 'guests can intentionally inspect their active audio');
+  panel.props.onClose();
+  assert.equal(nodes(PlaybackInfo({})).some(node => node.type === 'AudioDiagnosticsPanel'), false);
 });
 
 test('iOS Expo output picker remains available without the custom playback module', () => {

@@ -617,3 +617,31 @@ model: https://developer.apple.com/documentation/avfoundation/avplayer/currentit
 and https://developer.apple.com/documentation/mediaplayer/mpremotecommandcenter.
 iOS build 35001 requires a new native IPA; do not deliver it to player2 binaries
 as an OTA-only repair.
+
+### Audio details, Original sound and history
+
+Tap the player's status/quality text to open Audio details. It separates catalog
+identity from the selected audio URL's origin, source-reported quality from
+native player measurements, and source sample rate from iOS output sample rate.
+It never displays signed URLs or credentials. Unknown values stay unknown;
+backend responses without a reported bitrate no longer default to 320 kbps.
+Older native clients can still open the panel, but cannot report native fields.
+
+Profile → Playback → Original sound bypasses Mavrixfy EQ and compression without
+deleting saved presets or changing volume. Turning it off restores those effects
+on supported Android devices. iOS currently has no EQ/compressor implementation;
+its EQ controls are disabled and explain that limitation. Device/Bluetooth
+processing and source encoding are not changed by Original sound.
+
+Downloaded Songs rows show stored source bitrate/codec; legacy records show
+Quality unknown. This does not re-download or upgrade existing files.
+Home → Recently Played → See all and Profile → Listening History open a searchable
+list of saved recent songs. Search accepts title, artist and local YYYY-MM-DD
+dates, with 7/30-day filters. This is the existing latest-play-per-song history
+(up to 30 entries), not a full historical event log. Account generation checks
+prevent a delayed read from showing another signed-in account's history.
+
+Native runtime IDs now end in `audio-details1` on Android and iOS. Rebuild the
+APK/IPA; these native additions must not be shipped to older runtimes as an OTA.
+Android compilation and the emulator Original sound/format test passed. iOS
+Xcode compilation and device listening still require macOS and a rebuilt client.

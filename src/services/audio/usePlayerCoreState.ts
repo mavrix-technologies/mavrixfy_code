@@ -161,11 +161,18 @@ export function usePlayerCoreState({
     streamCacheDeadlines.current.set(songId, deadline);
   }, []);
 
+  const lastPrefetchedPairRef = useRef<string | null>(null);
+
   const resolvePlaybackUrlCached = useCallback(
-    async (song: Song, forcedQuality?: "auto" | "low" | "medium" | "high"): Promise<string | null> => {
+    async (
+      song: Song,
+      forcedQuality?: "auto" | "low" | "medium" | "high",
+      signal?: AbortSignal
+    ): Promise<string | null> => {
       if (!song?.id) return null;
+      if (signal?.aborted) throw new Error("YouTube request cancelled");
       if (isYouTubeSong(song)) {
-        const { url, qualityState } = await resolvePlaybackUrlWithDetails(song, forcedQuality);
+        const { url, qualityState } = await resolvePlaybackUrlWithDetails(song, forcedQuality, signal);
         if (song.id === currentSongRef.current?.id) setPlaybackQuality(qualityState);
         return url;
       }
@@ -179,13 +186,13 @@ export function usePlayerCoreState({
       } else if (cached && !forcedQuality) return cached;
 
       const pending = streamResolveCache.current.get(song.id);
-      if (pending && !forcedQuality) return pending;
+      if (pending && !forcedQuality && !signal) return pending;
 
-      const request = resolvePlaybackUrlWithDetails(song, forcedQuality)
+      const request = resolvePlaybackUrlWithDetails(song, forcedQuality, signal)
         .then(({ url, qualityState }) => {
           // Quality changes invalidate pending resolutions. An outgoing
           // result must not refill the cache or overwrite the new quality.
-          if (streamResolveCache.current.get(song.id) !== request) return url;
+          if (streamResolveCache.current.get(song.id) !== request && !signal) return url;
           if (url) {
             setStreamCache(song.id, url);
           }
@@ -200,7 +207,7 @@ export function usePlayerCoreState({
           }
         });
 
-      streamResolveCache.current.set(song.id, request);
+      if (!signal) streamResolveCache.current.set(song.id, request);
       return request;
     },
     [setStreamCache]
@@ -208,19 +215,27 @@ export function usePlayerCoreState({
 
   const prefetchAdjacentTrackStreams = useCallback(
     (songQueue: Song[], activeIndex: number) => {
+      const activeItem = songQueue[activeIndex];
       const nextItem = songQueue[activeIndex + 1];
+      if (!activeItem?.id || !nextItem?.id) return;
+      // NativePlaybackPlayer.warmQueue() already warms adjacent YouTube tracks on native platforms.
+      if (TrackPlayer && isYouTubeSong(nextItem)) return;
+      const pairKey = `${activeItem.id}:${nextItem.id}`;
+      if (lastPrefetchedPairRef.current === pairKey) return;
+      lastPrefetchedPairRef.current = pairKey;
+
       const queueAtPrefetch = songQueue;
       const accountAtPrefetch = getAccountScope();
-      if (nextItem) {
-        void resolvePlaybackUrlCached(nextItem)
-          .then(async (resolvedUrl) => {
-            if (resolvedUrl && isCurrentAccount(accountAtPrefetch) && queueRef.current === queueAtPrefetch && currentSongRef.current?.id === songQueue[activeIndex]?.id) {
-              if (TrackPlayer) await TrackPlayer.prepareTrack(songToTrack(nextItem, resolvedUrl));
-              if (!TrackPlayer) void ExpoAvPlayer.prepareNextTrack(resolvedUrl, withResolvedPlaybackUrl(nextItem, resolvedUrl));
-            }
-          })
-          .catch(() => null);
-      }
+      void resolvePlaybackUrlCached(nextItem)
+        .then(async (resolvedUrl) => {
+          if (resolvedUrl && isCurrentAccount(accountAtPrefetch) && queueRef.current === queueAtPrefetch && currentSongRef.current?.id === songQueue[activeIndex]?.id) {
+            if (TrackPlayer) await TrackPlayer.prepareTrack(songToTrack(nextItem, resolvedUrl));
+            if (!TrackPlayer) void ExpoAvPlayer.prepareNextTrack(resolvedUrl, withResolvedPlaybackUrl(nextItem, resolvedUrl));
+          }
+        })
+        .catch(() => {
+          if (lastPrefetchedPairRef.current === pairKey) lastPrefetchedPairRef.current = null;
+        });
     },
     [resolvePlaybackUrlCached, TrackPlayer]
   );

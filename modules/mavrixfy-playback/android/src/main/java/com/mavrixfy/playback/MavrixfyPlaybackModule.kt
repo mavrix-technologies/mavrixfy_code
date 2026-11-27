@@ -20,7 +20,7 @@ class MavrixfyPlaybackModule : Module() {
     AsyncFunction("setup") {
       binding.attach(engine)
       val context = requireNotNull(appContext.reactContext)
-      context.startService(Intent(context, PlaybackService::class.java))
+      runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
       engine.snapshot()
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("command") { name: String, args: Map<String, Any?> ->
@@ -28,7 +28,7 @@ class MavrixfyPlaybackModule : Module() {
       // reconnects the OS session without replacing the process-wide player.
       if (name == "play") {
         val context = requireNotNull(appContext.reactContext)
-        context.startService(Intent(context, PlaybackService::class.java))
+        runCatching { context.startService(Intent(context, PlaybackService::class.java)) }
       }
       engine.command(name, args)
     }.runOnQueue(Queues.MAIN)

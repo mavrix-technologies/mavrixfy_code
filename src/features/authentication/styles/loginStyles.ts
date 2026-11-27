@@ -120,6 +120,10 @@ export const styles = StyleSheet.create({
     gap: 13,
     marginBottom: 4,
   },
+  languagePickerWrap: {
+    marginTop: 6,
+    marginBottom: 2,
+  },
   fieldShell: {
     height: 54,
     borderRadius: 27,

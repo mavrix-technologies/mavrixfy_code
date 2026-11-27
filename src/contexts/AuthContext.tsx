@@ -42,7 +42,7 @@ interface AuthContextValue {
   isGuest: boolean;
   continueAsGuest: () => void;
   login: (email: string, password: string) => Promise<void>;
-  register: (email: string, password: string, fullName: string) => Promise<void>;
+  register: (email: string, password: string, fullName: string, preferredLanguages?: string[]) => Promise<void>;
   signInWithGoogle: () => Promise<void>;
   signInWithGoogleCredential: (idToken: string) => Promise<void>;
   signInWithApple: () => Promise<void>;
@@ -182,7 +182,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setLoading(false);
   }, []);
 
-  const register = useCallback(async (email: string, password: string, fullName: string) => {
+  const register = useCallback(async (email: string, password: string, fullName: string, preferredLanguages?: string[]) => {
     // Rate limit check
     const emailLower = email.trim().toLowerCase();
     const rateLimit = await checkRateLimit('auth:register', emailLower);
@@ -204,7 +204,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     void updateProfile(cred.user, { displayName }).catch((error) => {
       logger.warn("[AuthContext] Auth display name update failed:", error);
     });
-    void syncUserProfile(cred.user, { fullName: displayName }).catch((error) => {
+    void syncUserProfile(cred.user, {
+      fullName: displayName,
+      ...(preferredLanguages?.length ? { preferredLanguages } : {}),
+    }).catch((error) => {
       logger.warn("[AuthContext] New profile synchronization failed:", error);
     });
     logSignUp("email");

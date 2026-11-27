@@ -14,6 +14,7 @@ import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { logAppOpen } from "@/lib/analytics";
 import { GUEST_LOGIN_ENABLED } from "@/lib/authFeatures";
 import { logger } from "@/lib/logger";
+import { syncProfileLanguagesToLocal } from "@/lib/languagePreferences";
 import * as Animated from "@/lib/nativeAnimated";
 import { queryClient } from "@/lib/query-client";
 import { globalQueueSheetRef } from "@/lib/queueRef";
@@ -169,8 +170,14 @@ function useRootLayoutNavigation(launchComplete: boolean) {
   useScreenTracking();
   const { replace: routerReplace } = useRouter();
   const segments = useSegments();
-  const { loading, isAuthenticated, isGuest, firebaseUser } = useAuth();
+  const { loading, isAuthenticated, isGuest, firebaseUser, user } = useAuth();
   const isAllowedGuest = GUEST_LOGIN_ENABLED && isGuest;
+
+  useEffect(() => {
+    if (Array.isArray(user?.preferredLanguages) && user.preferredLanguages.length > 0) {
+      void syncProfileLanguagesToLocal(user.preferredLanguages).catch(() => {});
+    }
+  }, [user?.preferredLanguages]);
 
   // ── App Startup & Version Check Sequence ────────────────────────────────────
   useEffect(() => {
@@ -310,6 +317,7 @@ function RootLayoutNav({ launchComplete, onReady }: { launchComplete: boolean; o
         <Stack.Screen name="profile/[section]" />
         <Stack.Screen name="login" />
         <Stack.Screen name="equalizer" />
+        <Stack.Screen name="listening-history" />
       </Stack>
 
       {playerToolsEnabled && <YouTubePoTokenHost />}

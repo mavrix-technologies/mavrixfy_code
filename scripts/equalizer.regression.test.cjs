@@ -75,3 +75,35 @@ test('iOS preserves EQ preferences without pretending AVPlayer processes them',a
  await api.saveEqualizer({equalizer:config.EQUALIZER_PRESETS[1].bands,equalizerEnabled:true});
  assert.equal(calls.length,0);assert.equal(saved.length,1);
 });
+test('Original sound preference survives EQ save and native restore without deleting preset gains', async () => {
+ const calls=[],saved=[];
+ const settings={equalizer:config.EQUALIZER_PRESETS[1].bands,equalizerEnabled:true,normalizeVolume:true,originalSoundEnabled:true};
+ const api=load('src/services/audio/audioEqualizer.ts',{
+ 'react-native':{Platform:{OS:'android'}},expo:{isRunningInExpoGo:()=>false},
+ '@/lib/storage':{getSettings:async()=>settings,saveSettings:async value=>saved.push(value)},
+ '@/lib/logger':{logger:{warn(){}}},'./NativePlaybackPlayer':{setNativeEqualizer:(...args)=>calls.push(args)},'./equalizerConfig':config});
+ await api.saveEqualizer(settings);
+ assert.equal(saved[0].originalSoundEnabled,true);
+ assert.equal(saved[0].normalizeVolume,true);
+ assert.equal(calls.at(-1)[3],true);
+ const gains=JSON.stringify(calls.at(-1)[0]);
+ settings.originalSoundEnabled=false;
+ await api.syncEqualizerWithNative();
+ assert.equal(calls.at(-1)[3],false);
+ assert.equal(calls.at(-1)[1],true);
+ assert.equal(calls.at(-1)[2],true);
+ assert.equal(JSON.stringify(calls.at(-1)[0]),gains);
+});
+for (const os of ['android', 'ios']) test(`${os}: a late startup restore cannot undo an explicit Original sound choice`, async () => {
+ let restore; const modes=[],effects=[];
+ const api=load('src/services/audio/audioEqualizer.ts',{
+ 'react-native':{Platform:{OS:os}},expo:{isRunningInExpoGo:()=>false},
+ '@/lib/storage':{getSettings:()=>new Promise(resolve=>restore=resolve),saveSettings:async()=>{}},
+ '@/lib/logger':{logger:{warn(){}}},'./NativePlaybackPlayer':{setNativeEqualizer:(...args)=>effects.push(args),setNativeOriginalSound:async value=>modes.push(value)},'./equalizerConfig':config});
+ const pending=api.syncEqualizerWithNative();
+ await api.previewOriginalSound(true);
+ restore({equalizer:config.FLAT_EQUALIZER,equalizerEnabled:true,originalSoundEnabled:false});
+ await pending;
+ assert.deepEqual(modes,[true]);
+ assert.equal(effects.length,0);
+});

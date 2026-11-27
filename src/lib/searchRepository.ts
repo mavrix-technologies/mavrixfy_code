@@ -3,7 +3,7 @@ import {
   searchLiveITunesAlbums,
   searchLiveITunesArtists,
   searchSpotifyPlaylists,
-  generateDynamicSpotifyPlaylists,
+  enrichSpotifyPlaylistArtwork,
   SPOTIFY_PRESETS,
   SPOTIFY_PODCASTS,
 } from "@/services/spotify/SpotifyCatalogService";
@@ -13,6 +13,15 @@ import { getPlayableRemoteAudioUrl, Song, type JioSaavnImage } from "@/lib/music
 import { searchYouTubeMusic } from "@/services/youtube/YouTubeMusic";
 import { toDurationSeconds } from "@/utils/timeFormatters";
 import { fetchJsonStrict } from "@/utils/asyncUtils";
+import {
+  buildAcceptLanguageHeader,
+  INDIA_COUNTRY_CODE,
+  rankItemsByIndiaAndLanguages,
+} from "@/lib/musicLanguages";
+
+export interface SearchRepositoryOptions {
+  preferredLanguages?: readonly string[];
+}
 
 export type ResultFilter = "all" | "songs" | "albums" | "artists" | "playlists";
 
@@ -62,6 +71,10 @@ export const EMPTY_RESULTS: SearchResults = {
   playlists: [],
 };
 
+const searchCache = new Map<string, { at: number; results: SearchResults }>();
+export function clearSearchRepositoryCache(): void { searchCache.clear(); }
+const SEARCH_BUDGET_MS = 6000;
+
 const decodeHtml = (t: string): string =>
   t
     .replace(/&quot;/g, '"')
@@ -76,9 +89,19 @@ const decodeHtml = (t: string): string =>
  * Merges Spotify API suggestions, iTunes India, JioSaavn, and YouTube autocomplete
  * (Exact logic inspired by E:\ria)
  */
-export async function fetchYouTubeSuggestions(query: string, signal?: AbortSignal): Promise<string[]> {
+export async function fetchYouTubeSuggestions(
+  query: string,
+  signal?: AbortSignal,
+  options?: SearchRepositoryOptions
+): Promise<string[]> {
   const trimmed = query.trim();
-  if (!trimmed || trimmed.length < 2) return [];
+  if (!trimmed || trimmed.length < 2 || signal?.aborted) return [];
+  const acceptLanguage = buildAcceptLanguageHeader(options?.preferredLanguages);
+  const parentSignal = signal;
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  parentSignal?.addEventListener("abort", cancel, { once: true });
+  signal = controller.signal;
 
   const qLower = trimmed.toLowerCase();
   const suggestions: string[] = [];
@@ -99,22 +122,23 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
   // 2. Spotify / JioSaavn Server Autocomplete
   const serverPromise = (async () => {
     try {
-      const resp = await fetchAppApi(`/search?query=${encodeURIComponent(trimmed)}`, {
+      const resp = await fetchAppApi(`/search?query=${encodeURIComponent(trimmed)}&country=${INDIA_COUNTRY_CODE}`, {
         signal,
-        headers: { Accept: "application/json" },
+        headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
       });
       if (!resp?.ok) return [];
       const payload = await resp.json();
       const hits: string[] = [];
-      if (payload?.data?.topQuery?.results) {
-        for (const item of payload.data.topQuery.results) {
-          const title = item.title || item.name;
-          if (title && typeof title === "string") hits.push(title);
-        }
-      }
-      if (payload?.data?.songs?.results) {
-        for (const s of payload.data.songs.results.slice(0, 4)) {
-          const title = s.title || s.name;
+      for (const bucket of [
+        payload?.data?.topQuery?.results,
+        payload?.data?.songs?.results?.slice(0, 4),
+        payload?.data?.albums?.results?.slice(0, 3),
+        payload?.data?.artists?.results?.slice(0, 3),
+        payload?.data?.playlists?.results?.slice(0, 3),
+      ]) {
+        if (!Array.isArray(bucket)) continue;
+        for (const item of bucket) {
+          const title = item?.title || item?.name;
           if (title && typeof title === "string") hits.push(title);
         }
       }
@@ -127,8 +151,8 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
   // 3. iTunes India Autocomplete (from E:\ria\js\api.js)
   const itunesPromise = (async () => {
     try {
-      const url = `https://itunes.apple.com/search?term=${encodeURIComponent(trimmed)}&entity=song&country=IN&limit=8`;
-      const res = await fetch(url, { signal });
+      const url = `https://itunes.apple.com/search?term=${encodeURIComponent(trimmed)}&entity=song&country=${INDIA_COUNTRY_CODE}&limit=8`;
+      const res = await fetch(url, { signal, headers: { "Accept-Language": acceptLanguage } });
       if (!res.ok) return [];
       const data = await res.json();
       return (data.results || [])
@@ -139,11 +163,11 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
     }
   })();
 
-  // 4. YouTube Autocomplete
+  // 4. YouTube Autocomplete (India localized)
   const ytPromise = (async () => {
 
     try {
-      const url = `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&q=${encodeURIComponent(trimmed)}`;
+      const url = `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&gl=${INDIA_COUNTRY_CODE}&hl=en&q=${encodeURIComponent(trimmed)}`;
       const data = await fetchJsonStrict<[string, string[]]>(url, signal, 4000).catch(() => null);
       return Array.isArray(data) && Array.isArray(data[1])
         ? data[1].flatMap((s) => (typeof s === "string" && s.trim() ? [s.trim()] : []))
@@ -153,9 +177,26 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
     }
   })();
 
-  const [serverHits, itunesHits, ytHits] = await Promise.all([serverPromise, itunesPromise, ytPromise]);
-
-  const combined = [...suggestions, ...serverHits, ...itunesHits, ...ytHits];
+  const hits: string[][] = [[], [], []];
+  let done = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const stopped = new Promise<void>(resolve => {
+    signal.addEventListener("abort", () => resolve(), { once: true });
+    timeout = setTimeout(cancel, 1200);
+  });
+  try {
+    await Promise.race([Promise.all([serverPromise, itunesPromise, ytPromise].map(async (task, index) => {
+      const result = await task;
+      if (!done) hits[index] = result;
+    })), stopped]);
+  } finally {
+    done = true;
+    clearTimeout(timeout);
+    parentSignal?.removeEventListener("abort", cancel);
+    controller.abort();
+  }
+  if (parentSignal?.aborted) return [];
+  const combined = [...suggestions, ...hits.flat()];
   const seen = new Set<string>();
   const deduped: string[] = [];
 
@@ -167,7 +208,12 @@ export async function fetchYouTubeSuggestions(query: string, signal?: AbortSigna
     deduped.push(clean);
   }
 
-  return deduped.slice(0, 12);
+  return rankItemsByIndiaAndLanguages(
+    deduped,
+    trimmed,
+    options?.preferredLanguages,
+    (label) => ({ title: label })
+  ).slice(0, 12);
 }
 
 export function parseApiSong(s: any): Song | null {
@@ -238,19 +284,100 @@ export function parseApiSong(s: any): Song | null {
 export async function searchRepository(
   query: string,
   filter: ResultFilter = "all",
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  onPartial?: (results: SearchResults) => void,
+  options?: SearchRepositoryOptions
 ): Promise<SearchResults> {
   const trimmed = query.trim();
   if (!trimmed) return EMPTY_RESULTS;
   if (signal?.aborted) throw new Error("Search cancelled");
 
-  const qLower = trimmed.toLowerCase();
-  const isSpotifyQuery = qLower.includes("spot");
+  const preferredLanguages = options?.preferredLanguages;
+  const langCacheKey = preferredLanguages?.length
+    ? preferredLanguages.map((lang) => lang.trim().toLowerCase()).filter(Boolean).join(",")
+    : "default";
+  const acceptLanguage = buildAcceptLanguageHeader(preferredLanguages);
+  const cacheKey = `${filter}:${INDIA_COUNTRY_CODE}:${langCacheKey}:${trimmed.toLowerCase()}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 120_000) return cached.results;
+  const parentSignal = signal;
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  parentSignal?.addEventListener("abort", cancel, { once: true });
+  signal = controller.signal;
+  let finished = false;
+
 
   const songs: Song[] = [];
   const playlists: PlaylistResult[] = [];
   const albums: AlbumResult[] = [];
   const artists: ArtistResult[] = [];
+
+  function snapshot(): SearchResults {
+    // Deduplicate songs by normalized title + artist
+    const seenSongKeys = new Set<string>();
+    const dedupedSongs: Song[] = [];
+    for (const s of songs) {
+      const key = `${s.title.toLowerCase().trim()}_${s.artist.toLowerCase().trim()}`;
+      if (!seenSongKeys.has(key)) {
+        seenSongKeys.add(key);
+        dedupedSongs.push(s);
+      }
+    }
+
+    // Deduplicate playlists by id
+    const seenPlaylistIds = new Set<string>();
+    const dedupedPlaylists: PlaylistResult[] = [];
+    for (const pl of playlists) {
+      if (!seenPlaylistIds.has(pl.id)) {
+        seenPlaylistIds.add(pl.id);
+        dedupedPlaylists.push(pl);
+      }
+    }
+
+    // Deduplicate albums by id
+    const seenAlbumIds = new Set<string>();
+    const dedupedAlbums: AlbumResult[] = [];
+    for (const al of albums) {
+      if (!seenAlbumIds.has(al.id)) {
+        seenAlbumIds.add(al.id);
+        dedupedAlbums.push(al);
+      }
+    }
+
+    // Deduplicate artists by id
+    const seenArtistIds = new Set<string>();
+    const dedupedArtists: ArtistResult[] = [];
+    for (const ar of artists) {
+      if (!seenArtistIds.has(ar.id)) {
+        seenArtistIds.add(ar.id);
+        dedupedArtists.push(ar);
+      }
+    }
+
+    return {
+      songs: rankItemsByIndiaAndLanguages(dedupedSongs, trimmed, preferredLanguages, (song) => ({
+        title: song.title,
+        subtitle: `${song.artist || ""} ${song.album || ""}`,
+        language: song.language || song.genre,
+      })),
+      playlists: rankItemsByIndiaAndLanguages(dedupedPlaylists, trimmed, preferredLanguages, (pl) => ({
+        title: pl.name,
+        subtitle: pl.description,
+        language: pl.language,
+      })),
+      albums: rankItemsByIndiaAndLanguages(dedupedAlbums, trimmed, preferredLanguages, (al) => ({
+        title: al.name,
+        subtitle: `${al.artist || ""} ${al.description || ""}`,
+        language: al.language,
+      })),
+      artists: rankItemsByIndiaAndLanguages(dedupedArtists, trimmed, preferredLanguages, (ar) => ({
+        title: ar.name,
+        subtitle: ar.subtitle,
+        language: ar.dominantLanguage || undefined,
+      })),
+    };
+  }
 
   const tasks: Promise<void>[] = [];
 
@@ -275,9 +402,9 @@ export async function searchRepository(
       tasks.push(
         (async () => {
           try {
-            const resp = await fetchAppApi(`/spotify/search?query=${encodeURIComponent(trimmed)}&limit=25`, {
+            const resp = await fetchAppApi(`/spotify/search?query=${encodeURIComponent(trimmed)}&limit=25&country=${INDIA_COUNTRY_CODE}`, {
               signal,
-              headers: { Accept: "application/json" },
+              headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
             });
             if (resp?.ok) {
               const payload = await resp.json();
@@ -302,7 +429,8 @@ export async function searchRepository(
                   coverUrl: cover,
                   audioUrl: "",
                   source: "spotify",
-                  genre: raw.language || "Hindi",
+                  genre: raw.language || "",
+                  language: raw.language || undefined,
                 };
 
 
@@ -329,9 +457,9 @@ export async function searchRepository(
       tasks.push(
         (async () => {
           try {
-            const resp = await fetchAppApi(`/spotify/albums?query=${encodeURIComponent(trimmed)}&limit=15`, {
+            const resp = await fetchAppApi(`/spotify/albums?query=${encodeURIComponent(trimmed)}&limit=15&country=${INDIA_COUNTRY_CODE}`, {
               signal,
-              headers: { Accept: "application/json" },
+              headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
             });
             if (resp?.ok) {
               const payload = await resp.json();
@@ -370,17 +498,13 @@ export async function searchRepository(
       );
     }
 
-    // E. Spotify Presets & Dynamic Playlists
-    const spotifyPlaylists = searchSpotifyPlaylists(trimmed);
-    const dynamicPlaylists = generateDynamicSpotifyPlaylists(trimmed, songs[0]?.coverUrl);
-
+    // Only real identities: synthetic Mix/Radio cards reused unrelated artwork.
     if (filter === "all" || filter === "playlists") {
-      if (isSpotifyQuery) {
-        playlists.unshift(...spotifyPlaylists);
-      } else {
-        playlists.push(...spotifyPlaylists);
-        playlists.push(...dynamicPlaylists);
-      }
+      const matches = searchSpotifyPlaylists(trimmed);
+      tasks.push((async () => {
+        const hydrated = await enrichSpotifyPlaylistArtwork(matches.slice(0, 8));
+        playlists.push(...hydrated, ...matches.slice(8));
+      })());
     }
 
   // 2. JIOSAAVN SEARCH (Bollywood, Hindi, Punjabi Catalog & Albums/Playlists)
@@ -393,9 +517,9 @@ export async function searchRepository(
           if (filter === "all" || filter === "songs") {
             endpoints.push(
               (async () => {
-                const resp = await fetchAppApi(`/search/songs?query=${encodeURIComponent(trimmed)}&limit=25`, {
+                const resp = await fetchAppApi(`/search/songs?query=${encodeURIComponent(trimmed)}&limit=25&country=${INDIA_COUNTRY_CODE}`, {
                   signal,
-                  headers: { Accept: "application/json" },
+                  headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
                 });
                 if (!resp?.ok) return;
                 const payload = await resp.json();
@@ -421,9 +545,9 @@ export async function searchRepository(
           if (filter === "all" || filter === "albums") {
             endpoints.push(
               (async () => {
-                const resp = await fetchAppApi(`/search/albums?query=${encodeURIComponent(trimmed)}&limit=15`, {
+                const resp = await fetchAppApi(`/search/albums?query=${encodeURIComponent(trimmed)}&limit=15&country=${INDIA_COUNTRY_CODE}`, {
                   signal,
-                  headers: { Accept: "application/json" },
+                  headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
                 });
                 if (!resp?.ok) return;
                 const payload = await resp.json();
@@ -455,9 +579,9 @@ export async function searchRepository(
           if (filter === "all" || filter === "playlists") {
             endpoints.push(
               (async () => {
-                const resp = await fetchAppApi(`/search/playlists?query=${encodeURIComponent(trimmed)}&limit=15`, {
+                const resp = await fetchAppApi(`/search/playlists?query=${encodeURIComponent(trimmed)}&limit=15&country=${INDIA_COUNTRY_CODE}`, {
                   signal,
-                  headers: { Accept: "application/json" },
+                  headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
                 });
                 if (!resp?.ok) return;
                 const payload = await resp.json();
@@ -484,7 +608,7 @@ export async function searchRepository(
             );
           }
 
-          await Promise.allSettled(endpoints);
+          await Promise.allSettled(endpoints.map(endpoint => endpoint.finally(() => publish())));
         } catch {}
       })()
     );
@@ -513,53 +637,54 @@ export async function searchRepository(
       })()
     );
 
-  await Promise.allSettled(tasks);
-
-  // Deduplicate songs by normalized title + artist
-  const seenSongKeys = new Set<string>();
-  const dedupedSongs: Song[] = [];
-  for (const s of songs) {
-    const key = `${s.title.toLowerCase().trim()}_${s.artist.toLowerCase().trim()}`;
-    if (!seenSongKeys.has(key)) {
-      seenSongKeys.add(key);
-      dedupedSongs.push(s);
-    }
-  }
-
-  // Deduplicate playlists by id
-  const seenPlaylistIds = new Set<string>();
-  const dedupedPlaylists: PlaylistResult[] = [];
-  for (const pl of playlists) {
-    if (!seenPlaylistIds.has(pl.id)) {
-      seenPlaylistIds.add(pl.id);
-      dedupedPlaylists.push(pl);
-    }
-  }
-
-  // Deduplicate albums by id
-  const seenAlbumIds = new Set<string>();
-  const dedupedAlbums: AlbumResult[] = [];
-  for (const al of albums) {
-    if (!seenAlbumIds.has(al.id)) {
-      seenAlbumIds.add(al.id);
-      dedupedAlbums.push(al);
-    }
-  }
-
-  // Deduplicate artists by id
-  const seenArtistIds = new Set<string>();
-  const dedupedArtists: ArtistResult[] = [];
-  for (const ar of artists) {
-    if (!seenArtistIds.has(ar.id)) {
-      seenArtistIds.add(ar.id);
-      dedupedArtists.push(ar);
-    }
-  }
-
-  return {
-    songs: dedupedSongs,
-    playlists: dedupedPlaylists,
-    albums: dedupedAlbums,
-    artists: dedupedArtists,
+  const publish = () => {
+    if (finished || signal?.aborted) return;
+    const next = snapshot();
+    if (Object.values(next).some(items => items.length)) onPartial?.(next);
   };
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  let stopWaiting: (() => void) | undefined;
+  const stopped = new Promise<void>(resolve => { stopWaiting = resolve; });
+  signal.addEventListener("abort", () => stopWaiting?.(), { once: true });
+  timeout = setTimeout(() => controller.abort(), SEARCH_BUDGET_MS);
+  try {
+    publish();
+    await Promise.race([Promise.allSettled(tasks.map(task => task.finally(publish))), stopped]);
+    if (parentSignal?.aborted) throw new Error("Search cancelled");
+    const result = snapshot();
+    const hasResults = Object.values(result).some(items => items.length);
+    if (!hasResults && signal.aborted) throw new Error("Search timed out");
+    if (hasResults) {
+      const cachedAt = Date.now() - (signal.aborted ? 105_000 : 0);
+      searchCache.delete(cacheKey);
+      searchCache.set(cacheKey, { at: cachedAt, results: result });
+      if (filter === "all" && !signal.aborted) {
+        const lowerQuery = trimmed.toLowerCase();
+        const subFilters: readonly (keyof SearchResults)[] = ["songs", "artists", "albums", "playlists"];
+        for (const subFilter of subFilters) {
+          if (result[subFilter].length === 0) continue;
+          const subKey = `${subFilter}:${INDIA_COUNTRY_CODE}:${langCacheKey}:${lowerQuery}`;
+          searchCache.delete(subKey);
+          searchCache.set(subKey, {
+            at: cachedAt,
+            results: {
+              songs: subFilter === "songs" ? result.songs : [],
+              albums: subFilter === "albums" ? result.albums : [],
+              artists: subFilter === "artists" ? result.artists : [],
+              playlists: subFilter === "playlists" ? result.playlists : [],
+            },
+          });
+        }
+      }
+      while (searchCache.size > 40) searchCache.delete(searchCache.keys().next().value!);
+    }
+    return result;
+  } finally {
+    finished = true;
+    clearTimeout(timeout);
+    parentSignal?.removeEventListener("abort", cancel);
+    controller.abort();
+  }
+
+
 }

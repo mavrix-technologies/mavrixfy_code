@@ -3,40 +3,75 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { buildAppApiUrl } from "@/lib/api-config";
 import { sortedCopy } from "@/lib/arrayUtils";
 import { getBestAudioUrl,getBestImageUrl,type JioSaavnImage,type Song } from "@/lib/musicData";
+import { INDIA_COUNTRY_CODE, normalizeMusicLanguages, type MusicLanguageId } from "@/lib/musicLanguages";
+import { getSettings } from "@/lib/storage";
 import { fetchJsonStrict } from "@/utils/asyncUtils";
 import { getCurrentYear, isCompilationAlbum, isLikelyNewReleaseSong } from "./homeFreshness";
 
 const DAILY_NEW_RELEASE_CACHE_KEY = "@mavrixfy_daily_new_release_songs_v7";
 const DEFAULT_LIMIT = 24;
 
-const getNewReleaseQueries = (year: number) => [
-  `latest bollywood songs ${year}`,
-  `new bollywood songs ${year}`,
-  `trending bollywood songs ${year}`,
-  `new hindi movie songs ${year}`,
-  `latest hindi film songs ${year}`,
-  `trending hindi songs ${year}`,
-  `latest hindi hits ${year}`,
-  `t-series new songs ${year}`,
-  `zee music company new songs ${year}`,
-  `yrf new songs ${year}`,
-  `saregama new songs ${year}`,
-  `sony music india new songs ${year}`,
-  `tips official new songs ${year}`,
-  `bollywood new releases ${year}`,
-  `new hindi songs ${year}`,
-] as const;
+const LANGUAGE_NEW_RELEASE_QUERIES: Record<MusicLanguageId, (year: number) => readonly string[]> = {
+  hindi: (year) => [
+    `latest bollywood songs ${year}`,
+    `new hindi movie songs ${year}`,
+    `t-series new songs ${year}`,
+    `zee music company new songs ${year}`,
+    `yrf new songs ${year}`,
+    `trending hindi songs ${year}`,
+    `saregama new songs ${year}`,
+    `sony music india new songs ${year}`,
+  ],
+  punjabi: (year) => [
+    `latest punjabi songs ${year}`,
+    `new punjabi hits ${year}`,
+    `trending punjabi songs ${year}`,
+    `speed records new songs ${year}`,
+  ],
+  english: (year) => [
+    `latest english pop songs ${year}`,
+    `top english hits india ${year}`,
+    `new international hits ${year}`,
+  ],
+  tamil: (year) => [
+    `latest tamil movie songs ${year}`,
+    `new tamil songs ${year}`,
+    `trending tamil hits ${year}`,
+  ],
+  telugu: (year) => [
+    `latest telugu movie songs ${year}`,
+    `new telugu songs ${year}`,
+    `trending telugu hits ${year}`,
+  ],
+  marathi: (year) => [`latest marathi songs ${year}`, `new marathi hits ${year}`],
+  bengali: (year) => [`latest bengali songs ${year}`, `new bangla hits ${year}`],
+  malayalam: (year) => [`latest malayalam movie songs ${year}`, `new malayalam hits ${year}`],
+  kannada: (year) => [`latest kannada movie songs ${year}`, `new kannada hits ${year}`],
+  gujarati: (year) => [`latest gujarati songs ${year}`, `new gujarati hits ${year}`],
+  bhojpuri: (year) => [`latest bhojpuri songs ${year}`, `new bhojpuri hits ${year}`],
+};
 
-const getNewReleaseAlbumQueries = (year: number) => [
-  `new hindi movie songs ${year}`,
-  `latest bollywood songs ${year}`,
-  `new bollywood songs ${year}`,
-  `t-series new songs ${year}`,
-  `zee music new songs ${year}`,
-  `yrf new songs ${year}`,
-  `sony music hindi ${year}`,
-  `saregama hindi ${year}`,
-] as const;
+const getNewReleaseQueries = (year: number, preferredLanguages: readonly MusicLanguageId[]): string[] => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const buckets = preferredLanguages.map((lang) => LANGUAGE_NEW_RELEASE_QUERIES[lang]?.(year) ?? []);
+  const maxLen = Math.max(1, ...buckets.map((bucket) => bucket.length));
+  for (let i = 0; i < maxLen; i += 1) {
+    for (const bucket of buckets) {
+      const q = bucket[i];
+      if (!q || seen.has(q)) continue;
+      seen.add(q);
+      out.push(q);
+    }
+  }
+  return out;
+};
+
+const getNewReleaseAlbumQueries = (year: number, preferredLanguages: readonly MusicLanguageId[]): string[] =>
+  preferredLanguages.slice(0, 4).flatMap((lang) => [
+    `new ${lang} songs ${year}`,
+    `latest ${lang} album ${year}`,
+  ]);
 
 const OFFICIAL_LABEL_TERMS = [
   "t-series",
@@ -93,10 +128,19 @@ export type DailyNewReleaseSongOptions = {
   forceRefresh?: boolean;
   limit?: number;
   signal?: AbortSignal;
+  preferredLanguages?: readonly string[];
 };
 
 export async function clearDailyNewReleaseSongCache(): Promise<void> {
-  await AsyncStorage.removeItem(DAILY_NEW_RELEASE_CACHE_KEY).catch(() => undefined);
+  try {
+    const keys = await AsyncStorage.getAllKeys();
+    const targetKeys = keys.filter((key) => key.startsWith(DAILY_NEW_RELEASE_CACHE_KEY));
+    if (targetKeys.length > 0) {
+      await AsyncStorage.multiRemove(targetKeys);
+    }
+  } catch {
+    await AsyncStorage.removeItem(DAILY_NEW_RELEASE_CACHE_KEY).catch(() => undefined);
+  }
 }
 
 function getTodayKey(): string {
@@ -216,13 +260,17 @@ function getMovieScore(title: string, album: string): number {
   return score;
 }
 
-function normalizeAlbumCandidate(raw: any, resultRank: number): NewReleaseAlbumCandidate | null {
+function normalizeAlbumCandidate(
+  raw: any,
+  resultRank: number,
+  allowedLanguages: ReadonlySet<string>
+): NewReleaseAlbumCandidate | null {
   const id = cleanText(raw?.id || raw?.albumId || raw?.albumid || raw?._id);
   const name = cleanText(raw?.name || raw?.title);
   if (!id || !name) return null;
 
   const language = cleanText(raw?.language || raw?.lang).toLowerCase();
-  if (language && language !== "hindi") return null;
+  if (language && !allowedLanguages.has(language)) return null;
 
   const year = Number.parseInt(cleanText(raw?.year), 10);
   if (year !== getCurrentYear() && year !== getCurrentYear() - 1) return null;
@@ -237,7 +285,11 @@ function normalizeAlbumCandidate(raw: any, resultRank: number): NewReleaseAlbumC
   };
 }
 
-function normalizeNewReleaseCandidate(raw: any, resultRank: number): NewReleaseSongCandidate | null {
+function normalizeNewReleaseCandidate(
+  raw: any,
+  resultRank: number,
+  allowedLanguages: ReadonlySet<string>
+): NewReleaseSongCandidate | null {
   const type = cleanText(raw?.type).toLowerCase();
   if (type && type !== "song") return null;
 
@@ -254,7 +306,7 @@ function normalizeNewReleaseCandidate(raw: any, resultRank: number): NewReleaseS
     ? cleanText(raw.album)
     : cleanText(raw?.album?.name || raw?.more_info?.album);
   const language = cleanText(raw?.language || raw?.lang).toLowerCase();
-  if (language && language !== "hindi") return null;
+  if (language && !allowedLanguages.has(language)) return null;
 
   const label = cleanText(raw?.label || raw?.more_info?.label);
   const copyright = cleanText(raw?.copyright || raw?.more_info?.copyright);
@@ -289,7 +341,10 @@ function getSongKey(song: Song): string {
   return song.title.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-function scoreNewReleaseCandidate(candidate: NewReleaseSongCandidate): number {
+function scoreNewReleaseCandidate(
+  candidate: NewReleaseSongCandidate,
+  preferredLanguages: readonly MusicLanguageId[]
+): number {
   const { song } = candidate;
   const text = `${song.title} ${song.artist} ${song.album} ${song.genre} ${song.language}`.toLowerCase();
   const year = Number.parseInt(String(song.year || ""), 10);
@@ -301,8 +356,10 @@ function scoreNewReleaseCandidate(candidate: NewReleaseSongCandidate): number {
 
   score += candidate.officialScore * 0.8;
   score += candidate.movieScore >= 40 ? 180 : candidate.movieScore;
-  if (text.includes("hindi")) score += 42;
-  if (text.includes("bollywood")) score += 42;
+  const songLang = String(song.language || "").trim().toLowerCase();
+  const langIndex = preferredLanguages.indexOf(songLang as MusicLanguageId);
+  if (langIndex >= 0) score += Math.max(30, 85 - langIndex * 12);
+  if (preferredLanguages.includes("hindi") && text.includes("bollywood")) score += 42;
   if (text.includes("movie") || text.includes("film")) score += 34;
   if (text.includes("latest") || text.includes("new")) score += 58;
   if (text.includes("trending") || text.includes("viral") || text.includes("popular") || text.includes("hit")) score += 80;
@@ -323,19 +380,26 @@ function isCleanNewRelease(candidate: NewReleaseSongCandidate): boolean {
   );
 }
 
-function dedupeAndRankSongs(candidates: NewReleaseSongCandidate[], limit: number): Song[] {
+function dedupeAndRankSongs(
+  candidates: NewReleaseSongCandidate[],
+  limit: number,
+  preferredLanguages: readonly MusicLanguageId[]
+): Song[] {
   const bestBySongKey = new Map<string, NewReleaseSongCandidate>();
   for (const candidate of candidates.filter(isCleanNewRelease)) {
     const key = getSongKey(candidate.song);
     const previous = bestBySongKey.get(key);
-    if (!previous || scoreNewReleaseCandidate(candidate) > scoreNewReleaseCandidate(previous)) {
+    if (
+      !previous ||
+      scoreNewReleaseCandidate(candidate, preferredLanguages) > scoreNewReleaseCandidate(previous, preferredLanguages)
+    ) {
       bestBySongKey.set(key, candidate);
     }
   }
 
   const sorted = sortedCopy(
     Array.from(bestBySongKey.values()),
-    (left, right) => scoreNewReleaseCandidate(right) - scoreNewReleaseCandidate(left)
+    (left, right) => scoreNewReleaseCandidate(right, preferredLanguages) - scoreNewReleaseCandidate(left, preferredLanguages)
   );
   const selected: NewReleaseSongCandidate[] = [];
   const usedAlbums = new Set<string>();
@@ -360,8 +424,12 @@ function dedupeAndRankSongs(candidates: NewReleaseSongCandidate[], limit: number
   return selected.map((candidate) => candidate.song);
 }
 
-async function readCachedDailySongs(limit: number): Promise<Song[] | null> {
-  const raw = await AsyncStorage.getItem(DAILY_NEW_RELEASE_CACHE_KEY).catch(() => null);
+function getDailySongsCacheKey(langKey: string): string {
+  return `${DAILY_NEW_RELEASE_CACHE_KEY}:${langKey}`;
+}
+
+async function readCachedDailySongs(limit: number, langKey: string): Promise<Song[] | null> {
+  const raw = await AsyncStorage.getItem(getDailySongsCacheKey(langKey)).catch(() => null);
   if (!raw) return null;
 
   try {
@@ -373,12 +441,12 @@ async function readCachedDailySongs(limit: number): Promise<Song[] | null> {
   }
 }
 
-async function writeCachedDailySongs(songs: Song[]): Promise<void> {
+async function writeCachedDailySongs(songs: Song[], langKey: string): Promise<void> {
   const payload: DailySongCache = {
     dateKey: getTodayKey(),
     songs,
   };
-  await AsyncStorage.setItem(DAILY_NEW_RELEASE_CACHE_KEY, JSON.stringify(payload)).catch(() => undefined);
+  await AsyncStorage.setItem(getDailySongsCacheKey(langKey), JSON.stringify(payload)).catch(() => undefined);
 }
 
 
@@ -387,12 +455,14 @@ async function searchSongs(
   query: string,
   limit: number,
   forceRefresh: boolean,
+  allowedLanguages: ReadonlySet<string>,
   signal?: AbortSignal
 ): Promise<NewReleaseSongCandidate[]> {
   const params = [
     `query=${encodeURIComponent(query)}`,
     `limit=${Math.max(limit * 4, 40)}`,
     "page=1",
+    `country=${INDIA_COUNTRY_CODE}`,
   ];
   if (forceRefresh) {
     params.push("refresh=1", `ts=${Date.now()}`);
@@ -400,7 +470,7 @@ async function searchSongs(
 
   const payload = await fetchJsonStrict<any>(`${buildAppApiUrl("/search/songs")}?${params.join("&")}`, signal, 6500).catch(() => null);
   return unwrapSongResults(payload).flatMap((raw, index) => {
-    const song = normalizeNewReleaseCandidate(raw, index);
+    const song = normalizeNewReleaseCandidate(raw, index, allowedLanguages);
     return song ? [song] : [];
   });
 }
@@ -409,12 +479,14 @@ async function searchAlbums(
   query: string,
   limit: number,
   forceRefresh: boolean,
+  allowedLanguages: ReadonlySet<string>,
   signal?: AbortSignal
 ): Promise<NewReleaseAlbumCandidate[]> {
   const params = [
     `query=${encodeURIComponent(query)}`,
     `limit=${Math.max(limit, 8)}`,
     "page=1",
+    `country=${INDIA_COUNTRY_CODE}`,
   ];
   if (forceRefresh) {
     params.push("refresh=1", `ts=${Date.now()}`);
@@ -422,7 +494,7 @@ async function searchAlbums(
 
   const payload = await fetchJsonStrict<any>(`${buildAppApiUrl("/search/albums")}?${params.join("&")}`, signal, 6500).catch(() => null);
   return unwrapAlbumResults(payload).flatMap((raw, index) => {
-    const album = normalizeAlbumCandidate(raw, index);
+    const album = normalizeAlbumCandidate(raw, index, allowedLanguages);
     return album ? [album] : [];
   });
 }
@@ -431,9 +503,10 @@ async function fetchAlbumSongs(
   album: NewReleaseAlbumCandidate,
   albumRank: number,
   forceRefresh: boolean,
+  allowedLanguages: ReadonlySet<string>,
   signal?: AbortSignal
 ): Promise<NewReleaseSongCandidate[]> {
-  const params = [`id=${encodeURIComponent(album.id)}`];
+  const params = [`id=${encodeURIComponent(album.id)}`, `country=${INDIA_COUNTRY_CODE}`];
   if (forceRefresh) {
     params.push("refresh=1", `ts=${Date.now()}`);
   }
@@ -451,7 +524,8 @@ async function fetchAlbumSongs(
         language: raw?.language || albumData?.language || album.language,
         year: raw?.year || albumData?.year || album.year,
       },
-      albumRank * 50 + index
+      albumRank * 50 + index,
+      allowedLanguages
     );
     return song ? [song] : [];
   });
@@ -460,12 +534,17 @@ async function fetchAlbumSongs(
 async function fetchAlbumNewReleaseSongs(
   limit: number,
   forceRefresh: boolean,
+  preferredLanguages: readonly MusicLanguageId[],
+  allowedLanguages: ReadonlySet<string>,
   signal?: AbortSignal
 ): Promise<NewReleaseSongCandidate[]> {
-  // Focus on top 2 album queries on cold boot to avoid socket pool saturation
-  const primaryAlbumQueries = getNewReleaseAlbumQueries(getCurrentYear()).slice(0, forceRefresh ? 3 : 2);
+  // Focus on top queries aligned to India & user's selected languages
+  const primaryAlbumQueries = getNewReleaseAlbumQueries(getCurrentYear(), preferredLanguages).slice(
+    0,
+    forceRefresh ? 4 : 2
+  );
   const albumResults = await Promise.all(
-    primaryAlbumQueries.map((query) => searchAlbums(query, 6, forceRefresh, signal))
+    primaryAlbumQueries.map((query) => searchAlbums(query, 6, forceRefresh, allowedLanguages, signal))
   );
   const seen = new Set<string>();
   const albums: NewReleaseAlbumCandidate[] = [];
@@ -482,7 +561,7 @@ async function fetchAlbumNewReleaseSongs(
   }).slice(0, Math.min(limit, 3));
 
   const songResults = await Promise.all(
-    rankedAlbums.map((album, index) => fetchAlbumSongs(album, index, forceRefresh, signal))
+    rankedAlbums.map((album, index) => fetchAlbumSongs(album, index, forceRefresh, allowedLanguages, signal))
   );
   return songResults.flat();
 }
@@ -491,22 +570,28 @@ export async function getDailyNewReleaseSongs(options?: DailyNewReleaseSongOptio
   const limit = options?.limit ?? DEFAULT_LIMIT;
   const forceRefresh = options?.forceRefresh ?? false;
   const signal = options?.signal;
+  const preferredLanguages = normalizeMusicLanguages(
+    options?.preferredLanguages ?? (await getSettings().catch(() => null))?.preferredLanguages
+  );
+  const langKey = preferredLanguages.join(",");
+  const allowedLanguages = new Set<string>(preferredLanguages);
 
   if (!forceRefresh) {
-    const cached = await readCachedDailySongs(limit);
+    const cached = await readCachedDailySongs(limit, langKey);
     if (cached && cached.length > 0) return cached;
   }
 
-  // Use top 3 high-yielding queries on cold start to get 75+ songs without flooding the network
-  const activeQueries = getNewReleaseQueries(getCurrentYear()).slice(0, forceRefresh ? 5 : 3);
+  // Interleave queries across selected Indian languages
+  const queryBudget = Math.max(preferredLanguages.length, forceRefresh ? 5 : 3);
+  const activeQueries = getNewReleaseQueries(getCurrentYear(), preferredLanguages).slice(0, queryBudget);
 
   const [albumSongs, searchSongResults] = await Promise.all([
-    fetchAlbumNewReleaseSongs(limit, forceRefresh, signal),
-    Promise.all(activeQueries.map((query) => searchSongs(query, limit, forceRefresh, signal))),
+    fetchAlbumNewReleaseSongs(limit, forceRefresh, preferredLanguages, allowedLanguages, signal),
+    Promise.all(activeQueries.map((query) => searchSongs(query, limit, forceRefresh, allowedLanguages, signal))),
   ]);
-  const songs = dedupeAndRankSongs([...albumSongs, ...searchSongResults.flat()], limit);
+  const songs = dedupeAndRankSongs([...albumSongs, ...searchSongResults.flat()], limit, preferredLanguages);
   if (songs.length > 0) {
-    await writeCachedDailySongs(songs);
+    await writeCachedDailySongs(songs, langKey);
   }
   return songs;
 }

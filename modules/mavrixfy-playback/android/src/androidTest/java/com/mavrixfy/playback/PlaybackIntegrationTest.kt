@@ -82,6 +82,38 @@ class PlaybackIntegrationTest {
       }
     } finally { onMain { engine.command("reset", emptyMap()); engine.emit = null }; scenario.close() }
   }
+  @Test fun originalSoundBypassesEffectsAndDiagnosticsFollowTheActiveFile() {
+    val context = InstrumentationRegistry.getInstrumentation().targetContext
+    val scenario = ActivityScenario.launch(PlaybackTestActivity::class.java)
+    lateinit var engine: PlaybackEngine
+    try {
+      onMain {
+        engine = PlaybackEngine.get(context)
+        context.startService(Intent(context, PlaybackService::class.java))
+        engine.command("setQueue", mapOf("tracks" to listOf(mapOf("id" to "quality-tone", "url" to tone("quality-tone.wav", 12))), "index" to 0))
+        engine.command("play", emptyMap())
+      }
+      awaitCondition { state(engine)["state"] == "playing" }
+      onMain {
+        engine.command("equalizer", mapOf("gains" to List(15) { 2.0 }, "enabled" to true, "normalizeVolume" to true))
+        engine.command("originalSound", mapOf("enabled" to true))
+      }
+      val bypass = state(engine)["audioDiagnostics"] as Map<*, *>
+      assertEquals("quality-tone", bypass["trackId"])
+      assertEquals(44100, bypass["sampleRate"])
+      assertEquals(1, bypass["channelCount"])
+      assertEquals(true, bypass["originalSoundEnabled"])
+      assertEquals(false, bypass["equalizerActive"])
+      assertEquals(false, bypass["compressionActive"])
+      onMain { engine.command("originalSound", mapOf("enabled" to false)) }
+      val restored = state(engine)["audioDiagnostics"] as Map<*, *>
+      assertEquals(false, restored["originalSoundEnabled"])
+      if (state(engine)["equalizerAvailable"] == true) assertEquals(true, restored["equalizerActive"])
+    } finally {
+      onMain { engine.command("equalizer", mapOf("gains" to List(15) { 0.0 }, "enabled" to false, "normalizeVolume" to false, "originalSoundEnabled" to false)); engine.command("reset", emptyMap()) }
+      scenario.close()
+    }
+  }
   @Test fun pauseSeekAndQueueReorderPreserveNativeIntentAndPosition() {
     val context = InstrumentationRegistry.getInstrumentation().targetContext
     val a = mapOf("id" to "a", "url" to tone("native-long.wav", 30))

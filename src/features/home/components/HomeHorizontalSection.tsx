@@ -161,6 +161,9 @@ export const HomeHorizontalSection = memo(function HomeHorizontalSection({
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         horizontal
+        nestedScrollEnabled
+        directionalLockEnabled
+        overScrollMode="never"
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}

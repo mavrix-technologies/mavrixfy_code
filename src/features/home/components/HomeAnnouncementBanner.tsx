@@ -10,6 +10,7 @@ import { colorWithAlpha, normalizeHexColor } from "@/lib/colorMath";
 import {
   openMiniPlayerBannerLink,
   type MiniPlayerBannerConfig,
+  type MiniPlayerBannerItem,
 } from "@/lib/miniPlayerBannerConfig";
 import * as Animated from "@/lib/nativeAnimated";
 import { useAppIsActive } from "@/lib/appActivity";
@@ -24,6 +25,19 @@ function isDarkBannerBackground(color: string): boolean {
 const WAVE_PATH = `M0 0 H400 V4 ${Array.from({ length: 40 }, (_, i) =>
   `Q${395 - i * 10} ${i % 2 === 0 ? 12 : -4} ${390 - i * 10} 4`
 ).join(" ")} V0 Z`;
+
+function buildBannerDotEntries(items: readonly MiniPlayerBannerItem[], activePosition: number) {
+  const seen = new Map<string, number>();
+  return items.map((item, position) => {
+    const baseKey = `${item.iconName || ""}|${item.text || ""}|${item.subtitle || ""}|${item.linkUrl || ""}`;
+    const occurrence = (seen.get(baseKey) ?? 0) + 1;
+    seen.set(baseKey, occurrence);
+    return {
+      key: occurrence === 1 ? baseKey : `${baseKey}#${occurrence}`,
+      active: position === activePosition,
+    };
+  });
+}
 
 type HomeAnnouncementBannerProps = {
   config: MiniPlayerBannerConfig;
@@ -103,6 +117,7 @@ export const HomeAnnouncementBanner = React.memo(function HomeAnnouncementBanner
   const subtitleColor = darkBackground ? "rgba(255,255,255,0.72)" : "#758C90";
   const iconName = activeItem.iconName in Ionicons.glyphMap
     ? activeItem.iconName as keyof typeof Ionicons.glyphMap : "megaphone-outline";
+  const dotEntries = count > 1 ? buildBannerDotEntries(config.items, currentIndex % count) : [];
 
   return (
     <View style={styles.root} accessibilityElementsHidden={!presented || scrollVisibility === 2}
@@ -132,9 +147,9 @@ export const HomeAnnouncementBanner = React.memo(function HomeAnnouncementBanner
           </Animated.View>
           {count > 1 ? (
             <View style={styles.dots} pointerEvents="none" accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
-              {config.items.map((_, index) => (
-                <View key={index} style={[styles.dot, {
-                  backgroundColor: colorWithAlpha(textColor, index === currentIndex % count ? 0.9 : 0.24),
+              {dotEntries.map((dot) => (
+                <View key={dot.key} style={[styles.dot, {
+                  backgroundColor: colorWithAlpha(textColor, dot.active ? 0.9 : 0.24),
                 }]} />
               ))}
             </View>

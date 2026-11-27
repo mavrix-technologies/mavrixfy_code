@@ -1,10 +1,9 @@
 const assert = require("node:assert/strict");
-const fs = require("node:fs");
 const vm = require("node:vm");
 const test = require("node:test");
-const ts = require("typescript");
+const babel = require("@babel/core");
 
-function fixture({ viewport = 400, content = 6000, offset = 0, rowTop = 340, horizontal = false, round = false } = {}) {
+function fixture({ viewport = 400, content = 6000, offset = 0, rowTop = 340, horizontal = false, round = false, platform = "ios", attachedInitially = true } = {}) {
   const shared = value => ({ value });
   const values = {
     scrollOffset: shared(offset), scrollViewSize: shared(content), containerSize: shared(viewport),
@@ -20,27 +19,36 @@ function fixture({ viewport = 400, content = 6000, offset = 0, rowTop = 340, hor
   let attached;
   const native = { native: true };
   function animatedRef(ref) { if (arguments.length) attached = ref; return attached; }
+  // Reanimated 4.7 serializes this JS ref function to a non-callable UI object.
+  const uiRef = { get value() { return attached; } };
+  function onUI(fn) {
+    assert.ok(fn.__initData?.code, "execute the Babel-generated worklet, not its JS version");
+    const worklet = vm.runInNewContext(fn.__initData.code);
+    return worklet.bind({ __closure: fn.__closure.map(value => value === animatedRef ? uiRef : value) });
+  }
   const compiled = { exports: {} };
-  const code = ts.transpileModule(fs.readFileSync(
-    "node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx", "utf8"), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText;
+  const code = babel.transformFileSync("node_modules/react-native-draggable-flatlist/src/hooks/useAutoScroll.tsx", {
+    configFile: false, babelrc: false, presets: ["@babel/preset-typescript"],
+    plugins: ["react-native-worklets/plugin", "@babel/plugin-transform-modules-commonjs"],
+  }).code;
   vm.runInNewContext(code, {
-    module: compiled, exports: compiled.exports,
+    module: compiled, exports: compiled.exports, global: { Error },
     require(name) {
-      if (name === "react-native") return { Platform: { OS: "android" } };
+      if (name === "react-native") return { Platform: { OS: platform } };
       if (name === "react") return { useCallback: fn => fn, useEffect: fn => effects.push(fn) };
       if (name === "react-native-reanimated") return {
         useAnimatedRef: () => animatedRef,
         useFrameCallback: (callback, autostart) => {
-          frameCallback = callback;
+          frameCallback = onUI(callback);
           active = autostart;
           return { setActive: value => { active = value; activations.push(value); } };
         },
-        useAnimatedReaction: (read, react) => reactions.push({ read, react, previous: null }),
+        useAnimatedReaction: (read, react) => reactions.push({ read: onUI(read), react: onUI(react), previous: null }),
         runOnJS: fn => fn,
         scrollTo: (ref, x, y, animated) => {
-          assert.equal(ref(), native, "native scroll node, not a JS FlatList ref");
+          assert.equal(typeof ref, "object", "UI animated refs are not callable");
+          if (!ref.value) return; // Native dispatchCommand guards uninitialized refs.
+          assert.equal(ref.value, native, "native scroll node, not a JS FlatList ref");
           calls.push({ x, y, animated });
           const requested = horizontal ? x : y;
           // Model native rounding; scroll events need not reach the exact target.
@@ -54,7 +62,7 @@ function fixture({ viewport = 400, content = 6000, offset = 0, rowTop = 340, hor
       if (name.endsWith("propsContext")) return { useProps: () => ({ autoscrollThreshold: 96, autoscrollSpeed: 100 }) };
       if (name.endsWith("animatedValueContext")) return { useAnimatedValues: () => values };
       if (name.endsWith("refContext")) return { useRefs: () => ({ flatlistRef: { current: {
-        getNativeScrollRef: () => native,
+        getNativeScrollRef: () => attachedInitially ? native : null,
         scrollToOffset() { throw new Error("Autoscroll must not wait for a JS animated jump"); },
       } } }) };
       throw new Error(`Unexpected dependency: ${name}`);
@@ -72,6 +80,20 @@ function fixture({ viewport = 400, content = 6000, offset = 0, rowTop = 340, hor
   }
   return { values, calls, activations, frame, isActive: () => active };
 }
+
+for (const platform of ["ios", "android"]) {
+  test(`${platform}: first drag frame supports Reanimated 4.7 UI refs`, () => {
+    const f = fixture({ platform });
+    assert.doesNotThrow(() => f.frame());
+    assert.equal(f.calls.length, 1);
+  });
+}
+
+test("uninitialized native refs safely skip scrolling", () => {
+  const f = fixture({ attachedInitially: false });
+  assert.doesNotThrow(() => f.frame());
+  assert.equal(f.calls.length, 0);
+});
 
 test("holding a row at the lower edge scrolls continuously to the last row", () => {
   const f = fixture({ round: true });

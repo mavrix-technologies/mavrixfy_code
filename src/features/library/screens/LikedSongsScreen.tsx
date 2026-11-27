@@ -1,10 +1,10 @@
 /* eslint-disable react-hooks/immutability -- Reanimated shared values are updated inside user-event handlers. */
 import AdMobBanner from "@/components/AdMobBanner";
-import AppTopHeader,{
-APP_TOP_HEADER_HEIGHT,
-AppTopHeaderDownloadButton,
-AppTopHeaderProfileButton,
-useAppTopHeaderScrollElevation,
+import AppTopHeader, {
+  APP_TOP_HEADER_HEIGHT,
+  AppTopHeaderDownloadButton,
+  AppTopHeaderProfileButton,
+  useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
 import { CollectionHero } from "@/components/CollectionHero";
 import DownloadCollectionButton from "@/components/DownloadCollectionButton";
@@ -13,29 +13,31 @@ import OfflineBanner from "@/components/OfflineBanner";
 import { SearchHeaderField } from "@/components/SearchHeaderField";
 import SongRow from "@/components/SongRow";
 import SongRowSkeleton from "@/components/SongRowSkeleton";
-import { IS_ANDROID,IS_WEB } from "@/constants/platform";
+import { IS_ANDROID, IS_WEB } from "@/constants/platform";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNetwork } from "@/contexts/NetworkContext";
-import { useLikedSongs,usePlayerBrowse } from "@/contexts/PlayerContext";
+import { useLikedSongs, usePlayerBrowse } from "@/contexts/PlayerContext";
 import { globalAddSongsSheetRef } from "@/lib/addSongsSheetRef";
 import { triggerImpact } from "@/lib/haptics";
 import { type Song } from "@/lib/musicData";
-import { usePlaybackNowPlaying,usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
+import { usePlaybackNowPlaying, usePlaybackPlayState } from "@/services/audio/PlaybackEngine";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { ImpactFeedbackStyle } from "expo-haptics";
 import { LinearGradient } from "expo-linear-gradient";
-import { useCallback,useEffect,useMemo,useRef,useState } from "react";
-import {FlatList,Pressable,StyleSheet,Text,View,type TextInputInstance,type NativeScrollEvent,type NativeSyntheticEvent } from "react-native";
-import Animated,{
-Easing,
-useAnimatedStyle,
-useSharedValue,
-withTiming,
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { FlatList, Pressable, StyleSheet, Text, View, type TextInputInstance, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import Colors from "@/constants/colors";
 
-import { LIKED_SONGS_UI as UI,styles } from "../styles/likedSongsStyles";
+import { LIKED_SONGS_UI as UI, styles } from "../styles/likedSongsStyles";
+import { MainTabSwipeSurface } from "@/features/navigation/MainTabSwipeSurface";
+import { useOptionalNavSwipe } from "@/features/navigation/navSwipeContext";
 
 const MOOD_SUGGESTIONS = [
   "Smooth",
@@ -82,6 +84,7 @@ export function LikedSongsScreen() {
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
   const [isSearchMode, setIsSearchMode] = useState(false);
   const searchInputRef = useRef<TextInputInstance>(null);
+  const navSwipe = useOptionalNavSwipe();
   const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
 
   // Reanimated shared values for the search overlay
@@ -244,7 +247,7 @@ export function LikedSongsScreen() {
       playSong(song, filteredSongsRef.current);
     },
     // filteredSongsRef is stable — read current value at call time
-     
+
     [playSong]
   );
 
@@ -274,7 +277,7 @@ export function LikedSongsScreen() {
       );
     },
     // handleSongPress is stable; filteredSongsRef read at call time — no re-render on list change
-     
+
     [handleSongPress]
   );
 
@@ -308,261 +311,271 @@ export function LikedSongsScreen() {
       : "No songs";
 
   return (
-    <View style={styles.container}>
-      {/* Base background */}
-      <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
+    <MainTabSwipeSurface route="liked-songs" disabled={isSearchMode}>
+      <View style={styles.container}>
+        {/* Base background */}
+        <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
 
-      {/* Ambient glow — bleeds the primary green from top header area downward */}
-      <LinearGradient
-        colors={[
-          "rgba(38,225,154,0.22)",
-          "rgba(20,180,120,0.10)",
-          "rgba(10,100,70,0.04)",
-          "transparent",
-        ]}
-        locations={[0, 0.38, 0.62, 1]}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-        style={styles.ambientGlow}
-      />
+        {/* Ambient glow — bleeds the primary green from top header area downward */}
+        <LinearGradient
+          colors={[
+            "rgba(38,225,154,0.22)",
+            "rgba(20,180,120,0.10)",
+            "rgba(10,100,70,0.04)",
+            "transparent",
+          ]}
+          locations={[0, 0.38, 0.62, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          style={styles.ambientGlow}
+        />
 
-      {!isOnline && <OfflineBanner />}
-      <AppTopHeader
-        topInset={topInset}
-        elevated={isHeaderElevated}
-        title="Liked Songs"
-        left={<AppTopHeaderProfileButton />}
-        leftWidth={84}
-        rightWidth={84}
-        right={
-          <View style={styles.headerRightContainer}>
-            <Animated.View style={[styles.downloadButtonWrapper, downloadAnimStyle]}>
-              <AppTopHeaderDownloadButton />
-            </Animated.View>
-            <Animated.View
-              pointerEvents={isStickyPlayActive ? "auto" : "none"}
-              style={[styles.stickyPlayButton, stickyPlayStyle]}
-            >
+        {!isOnline && <OfflineBanner />}
+        <AppTopHeader
+          topInset={topInset}
+          elevated={isHeaderElevated}
+          title="Liked Songs"
+          left={<AppTopHeaderProfileButton />}
+          leftWidth={84}
+          rightWidth={84}
+          right={
+            <View style={styles.headerRightContainer}>
+              <Animated.View style={[styles.downloadButtonWrapper, downloadAnimStyle]}>
+                <AppTopHeaderDownloadButton />
+              </Animated.View>
+              <Animated.View
+                pointerEvents={isStickyPlayActive ? "auto" : "none"}
+                style={[styles.stickyPlayButton, stickyPlayStyle]}
+              >
+                <Pressable
+                  onPress={handlePlayAll}
+                  accessibilityRole="button"
+                  accessibilityLabel={isPlayingFromLikedSongs && isPlaying ? "Pause liked songs" : "Play liked songs"}
+                  style={({ pressed }) => [
+                    styles.stickyPlayInner,
+                    pressed && styles.stickyPlayButtonPressed,
+                  ]}
+                >
+                  <Ionicons
+                    name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
+                    size={16}
+                    color="#06241A"
+                    style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 1 } : undefined}
+                  />
+                </Pressable>
+              </Animated.View>
+            </View>
+          }
+        />
+
+        <FlatList
+          data={filteredSongs}
+          keyExtractor={keyExtractor}
+          renderItem={renderSong}
+          getItemLayout={getItemLayout}
+          initialNumToRender={12}
+          maxToRenderPerBatch={10}
+          windowSize={5}
+          updateCellsBatchingPeriod={50}
+          removeClippedSubviews={IS_ANDROID}
+          ListHeaderComponent={
+            <>
               <Pressable
-                onPress={handlePlayAll}
+                onPress={openSearch}
                 accessibilityRole="button"
-                accessibilityLabel={isPlayingFromLikedSongs && isPlaying ? "Pause liked songs" : "Play liked songs"}
+                accessibilityLabel="Search liked songs"
+                style={styles.searchContainer}
+              >
+                <View pointerEvents="none">
+                  <SearchHeaderField
+                    value=""
+                    onChangeText={() => { }}
+                    onClear={() => { }}
+                    placeholder="Search liked songs..."
+                  />
+                </View>
+              </Pressable>
+
+              <CollectionHero
+                customIcon={<NavLikedIcon size={46} color="#042115" isFocused />}
+                iconGradientColors={[UI.primaryA, UI.primaryB]}
+                showIconCard={true}
+                title="Liked Songs"
+                meta={headerMeta}
+                isPlaying={isPlayingFromLikedSongs && isPlaying}
+                isShuffled={isShuffled}
+                onPlayAll={handlePlayAll}
+                onShufflePlay={handleShufflePlay}
+                leftAction={
+                  <DownloadCollectionButton
+                    songs={playableFilteredSongs}
+                    collectionId="liked-songs"
+                    collectionName="Liked Songs"
+                    collectionImage=""
+                    compact
+                  />
+                }
+              />
+
+
+              {songs.length > 0 && (
+                <View
+                  style={styles.moodSection}
+                  onTouchStart={() => navSwipe?.setInnerHorizontalLock(true)}
+                  onTouchEnd={() => navSwipe?.setInnerHorizontalLock(false)}
+                  onTouchCancel={() => navSwipe?.setInnerHorizontalLock(false)}
+                >
+                  <FlatList
+                    horizontal
+                    nestedScrollEnabled
+                    onScrollEndDrag={() => navSwipe?.setInnerHorizontalLock(false)}
+                    onMomentumScrollEnd={() => navSwipe?.setInnerHorizontalLock(false)}
+                    data={availableMoods}
+                    keyExtractor={(item) => item}
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.moodScrollContent}
+                    ListHeaderComponent={
+                      selectedMood ? (
+                        <Pressable
+                          onPress={() => setSelectedMood(null)}
+                          accessibilityRole="button"
+                          accessibilityLabel={`${selectedMood} mood filter, selected`}
+                          accessibilityState={{ selected: true }}
+                          style={[styles.moodChip, styles.moodChipActive]}
+                        >
+                          <Ionicons name="close" size={14} color="#042115" style={{ marginRight: 4 }} />
+                          <Text style={[styles.moodChipText, styles.moodChipTextActive]}>{selectedMood}</Text>
+                        </Pressable>
+                      ) : undefined
+                    }
+                    renderItem={renderMoodChip}
+                  />
+                </View>
+              )}
+
+              <AdMobBanner loadDelayMs={800} />
+
+              <Pressable
+                onPress={() => {
+                  void triggerImpact(ImpactFeedbackStyle.Light);
+                  globalAddSongsSheetRef.current?.expand();
+                }}
+                accessibilityRole="button"
+                accessibilityLabel="Add songs to liked songs"
                 style={({ pressed }) => [
-                  styles.stickyPlayInner,
-                  pressed && styles.stickyPlayButtonPressed,
+                  styles.addSongsContainer,
+                  pressed && styles.addSongsContainerPressed,
                 ]}
               >
-                <Ionicons
-                  name={isPlayingFromLikedSongs && isPlaying ? "pause" : "play"}
-                  size={16}
-                  color="#06241A"
-                  style={!isPlayingFromLikedSongs || !isPlaying ? { marginLeft: 1 } : undefined}
-                />
+                <View style={styles.addSongsSquare}>
+                  <Ionicons name="add" size={26} color={UI.text} />
+                </View>
+                <Text style={styles.addSongsText}>Add songs</Text>
               </Pressable>
-            </Animated.View>
-          </View>
-        }
-      />
 
-      <FlatList
-        data={filteredSongs}
-        keyExtractor={keyExtractor}
-        renderItem={renderSong}
-        getItemLayout={getItemLayout}
-        initialNumToRender={12}
-        maxToRenderPerBatch={10}
-        windowSize={5}
-        updateCellsBatchingPeriod={50}
-        removeClippedSubviews={IS_ANDROID}
-        ListHeaderComponent={
-          <>
-            <Pressable
-              onPress={openSearch}
-              accessibilityRole="button"
-              accessibilityLabel="Search liked songs"
-              style={styles.searchContainer}
-            >
-              <View pointerEvents="none">
-                <SearchHeaderField
-                  value=""
-                  onChangeText={() => {}}
-                  onClear={() => {}}
-                  placeholder="Search liked songs..."
-                />
+              {filteredSongs.length > 0 ? <View style={styles.songListSpacer} /> : null}
+            </>
+          }
+          ListEmptyComponent={
+            !initialized || (status === "loading" && songs.length === 0) ? (
+              <View style={{ paddingTop: 8 }}>
+                <SongRowSkeleton count={8} />
               </View>
-            </Pressable>
+            ) : (
+              <View style={styles.emptyWrap}>
+                <Ionicons name={selectedMood ? "funnel-outline" : searchQuery ? "search-outline" : "heart-outline"} size={56} color={UI.subtext} />
+                <Text style={styles.emptyTitle}>
+                  {selectedMood
+                    ? `No ${selectedMood} songs found`
+                    : searchQuery
+                      ? "No songs found"
+                      : isAuthenticated
+                        ? "No liked songs yet"
+                        : "Sign in to view liked songs"}
+                </Text>
+                <Text style={styles.emptySubtitle}>
+                  {selectedMood
+                    ? `None of your liked songs matched the ${selectedMood} mood.`
+                    : searchQuery
+                      ? `No results for "${searchQuery}"`
+                      : isAuthenticated
+                        ? "Tap the heart on any song to save it here."
+                        : "Sign in to sync your liked songs across all your devices."}
+                </Text>
+              </View>
+            )
+          }
+          style={styles.list}
+          contentContainerStyle={[
+            styles.listContent,
+            { paddingTop: topInset + APP_TOP_HEADER_HEIGHT },
+            filteredSongs.length === 0 ? styles.listContentEmpty : undefined,
+          ]}
+          showsVerticalScrollIndicator={false}
+          onScroll={handleScroll}
+          scrollEventThrottle={16}
+        />
 
-            <CollectionHero
-              customIcon={<NavLikedIcon size={46} color="#042115" isFocused />}
-              iconGradientColors={[UI.primaryA, UI.primaryB]}
-              showIconCard={true}
-              title="Liked Songs"
-              meta={headerMeta}
-              isPlaying={isPlayingFromLikedSongs && isPlaying}
-              isShuffled={isShuffled}
-              onPlayAll={handlePlayAll}
-              onShufflePlay={handleShufflePlay}
-              leftAction={
-                <DownloadCollectionButton
-                  songs={playableFilteredSongs}
-                  collectionId="liked-songs"
-                  collectionName="Liked Songs"
-                  collectionImage=""
-                  compact
-                />
-              }
+        {/* Animated search overlay — slides in smoothly over the main screen */}
+        {isSearchMode && (
+          <Animated.View style={[styles.searchOverlay, searchOverlayStyle]}>
+            <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
+            <LinearGradient
+              colors={["rgba(38,225,154,0.14)", "transparent"]}
+              style={[styles.ambientGlow, { height: 160 }]}
             />
 
-
-            {songs.length > 0 && (
-              <View style={styles.moodSection}>
-                <FlatList
-                  horizontal
-                  data={availableMoods}
-                  keyExtractor={(item) => item}
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.moodScrollContent}
-                  ListHeaderComponent={
-                    selectedMood ? (
-                      <Pressable
-                        onPress={() => setSelectedMood(null)}
-                        accessibilityRole="button"
-                        accessibilityLabel={`${selectedMood} mood filter, selected`}
-                        accessibilityState={{ selected: true }}
-                        style={[styles.moodChip, styles.moodChipActive]}
-                      >
-                        <Ionicons name="close" size={14} color="#042115" style={{ marginRight: 4 }} />
-                        <Text style={[styles.moodChipText, styles.moodChipTextActive]}>{selectedMood}</Text>
-                      </Pressable>
-                    ) : undefined
-                  }
-                  renderItem={renderMoodChip}
+            {/* Search header */}
+            <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
+              <View style={{ flex: 1 }}>
+                <SearchHeaderField
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  onClear={() => setSearchQuery("")}
+                  placeholder="Search liked songs..."
+                  autoFocus={true}
                 />
               </View>
-            )}
-
-            <AdMobBanner loadDelayMs={800} />
-
-            <Pressable
-              onPress={() => {
-                void triggerImpact(ImpactFeedbackStyle.Light);
-                globalAddSongsSheetRef.current?.expand();
-              }}
-              accessibilityRole="button"
-              accessibilityLabel="Add songs to liked songs"
-              style={({ pressed }) => [
-                styles.addSongsContainer,
-                pressed && styles.addSongsContainerPressed,
-              ]}
-            >
-              <View style={styles.addSongsSquare}>
-                <Ionicons name="add" size={26} color={UI.text} />
-              </View>
-              <Text style={styles.addSongsText}>Add songs</Text>
-            </Pressable>
-
-            {filteredSongs.length > 0 ? <View style={styles.songListSpacer} /> : null}
-          </>
-        }
-        ListEmptyComponent={
-          !initialized || (status === "loading" && songs.length === 0) ? (
-            <View style={{ paddingTop: 8 }}>
-              <SongRowSkeleton count={8} />
+              <Pressable
+                onPress={closeSearch}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel search"
+                style={styles.searchModeCancelButton}
+              >
+                <Text style={styles.searchModeCancelText}>Cancel</Text>
+              </Pressable>
             </View>
-          ) : (
-            <View style={styles.emptyWrap}>
-              <Ionicons name={selectedMood ? "funnel-outline" : searchQuery ? "search-outline" : "heart-outline"} size={56} color={UI.subtext} />
-              <Text style={styles.emptyTitle}>
-                {selectedMood
-                  ? `No ${selectedMood} songs found`
-                  : searchQuery
-                    ? "No songs found"
-                    : isAuthenticated
-                      ? "No liked songs yet"
-                      : "Sign in to view liked songs"}
-              </Text>
-              <Text style={styles.emptySubtitle}>
-                {selectedMood
-                  ? `None of your liked songs matched the ${selectedMood} mood.`
-                  : searchQuery
-                    ? `No results for "${searchQuery}"`
-                    : isAuthenticated
-                      ? "Tap the heart on any song to save it here."
-                      : "Sign in to sync your liked songs across all your devices."}
-              </Text>
-            </View>
-          )
-        }
-        style={styles.list}
-        contentContainerStyle={[
-          styles.listContent,
-          { paddingTop: topInset + APP_TOP_HEADER_HEIGHT },
-          filteredSongs.length === 0 ? styles.listContentEmpty : undefined,
-        ]}
-        showsVerticalScrollIndicator={false}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-      />
 
-      {/* Animated search overlay — slides in smoothly over the main screen */}
-      {isSearchMode && (
-        <Animated.View style={[styles.searchOverlay, searchOverlayStyle]}>
-          <LinearGradient colors={[Colors.background, Colors.background]} style={StyleSheet.absoluteFillObject} />
-          <LinearGradient
-            colors={["rgba(38,225,154,0.14)", "transparent"]}
-            style={[styles.ambientGlow, { height: 160 }]}
-          />
-
-          {/* Search header */}
-          <View style={[styles.searchModeHeader, { paddingTop: topInset + 10 }]}>
-            <View style={{ flex: 1 }}>
-              <SearchHeaderField
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-                onClear={() => setSearchQuery("")}
-                placeholder="Search liked songs..."
-                autoFocus={true}
-              />
-            </View>
-            <Pressable
-              onPress={closeSearch}
-              accessibilityRole="button"
-              accessibilityLabel="Cancel search"
-              style={styles.searchModeCancelButton}
-            >
-              <Text style={styles.searchModeCancelText}>Cancel</Text>
-            </Pressable>
-          </View>
-
-          {/* Results list */}
-          <FlatList
-            data={filteredSongs}
-            keyExtractor={keyExtractor}
-            renderItem={renderSong}
-            getItemLayout={getItemLayout}
-            contentContainerStyle={styles.searchModeListContent}
-            showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled"
-            initialNumToRender={12}
-            maxToRenderPerBatch={10}
-            windowSize={5}
-            updateCellsBatchingPeriod={50}
-            removeClippedSubviews={IS_ANDROID}
-            ListEmptyComponent={
-              searchQuery ? (
-                <View style={styles.searchModeEmptyWrap}>
-                  <Ionicons name="search-outline" size={48} color={UI.subtext} style={{ opacity: 0.7 }} />
-                  <Text style={styles.searchModeEmptyTitle}>No results found</Text>
-                  <Text style={styles.searchModeEmptySubtitle}>
-                    {`No liked songs matched "${searchQuery}"`}
-                  </Text>
-                </View>
-              ) : undefined
-            }
-          />
-        </Animated.View>
-      )}
-    </View>
+            {/* Results list */}
+            <FlatList
+              data={filteredSongs}
+              keyExtractor={keyExtractor}
+              renderItem={renderSong}
+              getItemLayout={getItemLayout}
+              contentContainerStyle={styles.searchModeListContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              initialNumToRender={12}
+              maxToRenderPerBatch={10}
+              windowSize={5}
+              updateCellsBatchingPeriod={50}
+              removeClippedSubviews={IS_ANDROID}
+              ListEmptyComponent={
+                searchQuery ? (
+                  <View style={styles.searchModeEmptyWrap}>
+                    <Ionicons name="search-outline" size={48} color={UI.subtext} style={{ opacity: 0.7 }} />
+                    <Text style={styles.searchModeEmptyTitle}>No results found</Text>
+                    <Text style={styles.searchModeEmptySubtitle}>
+                      {`No liked songs matched "${searchQuery}"`}
+                    </Text>
+                  </View>
+                ) : undefined
+              }
+            />
+          </Animated.View>
+        )}
+      </View>
+    </MainTabSwipeSurface>
   );
 }
 

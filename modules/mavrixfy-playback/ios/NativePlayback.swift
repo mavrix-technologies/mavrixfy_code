@@ -14,6 +14,7 @@ final class NativePlayback {
   private let playbackLog = Logger(subsystem: "com.mavrixfy.playback", category: "Playback")
   private var index = -1
   private var intendedPlay = false
+  private var originalSoundEnabled = false
   private var revision = 0
   private var interruptionRevision: Int?
   private var repeatMode = "off"
@@ -188,7 +189,16 @@ final class NativePlayback {
   }
   func snapshot() -> [String: Any] {
     reconcileItem()
-    return ["queue": tracks, "index": index, "state": status(), "position": position(), "duration": duration(), "buffered": bufferedPosition(), "playWhenReady": intendedPlay, "equalizerAvailable": false]
+    let session = AVAudioSession.sharedInstance()
+    let diagnostic: [String: Any] = [
+      "trackId": tracks.indices.contains(index) ? tracks[index]["id"] as? String ?? "" : "",
+      "bitrate": player.currentItem?.accessLog()?.events.last?.averageAudioBitrate ?? -1,
+      "outputSampleRate": session.sampleRate,
+      "outputChannels": session.outputNumberOfChannels,
+      "equalizerActive": false, "compressionActive": false,
+      "originalSoundEnabled": originalSoundEnabled, "volume": player.volume
+    ]
+    return ["queue": tracks, "index": index, "state": status(), "position": position(), "duration": duration(), "buffered": bufferedPosition(), "playWhenReady": intendedPlay, "equalizerAvailable": false, "audioDiagnostics": diagnostic]
   }
   private func activate() throws {
     let session = AVAudioSession.sharedInstance()
@@ -415,6 +425,7 @@ final class NativePlayback {
       tracks.insert(tracks.remove(at: next), at: to); try select(selected, position(), preserveCurrent: true)
     }
     case "equalizer": throw NSError(domain: "MavrixfyPlayback", code: 4, userInfo: [NSLocalizedDescriptionKey: "AVPlayer does not provide built-in EQ processing."])
+    case "originalSound": originalSoundEnabled = args["enabled"] as? Bool ?? false
     default: throw NSError(domain: "MavrixfyPlayback", code: 3, userInfo: [NSLocalizedDescriptionKey: "Unknown playback command."])
     }
     nowPlaying()

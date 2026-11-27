@@ -130,3 +130,55 @@ test('secondary screens own their dock so a modal naturally covers it', () => {
   auth.isGuest = true;
   assert.equal(ScreenWithNavigation({ children: 'screen' }).props.children[1].type, 'AppNavBar');
 });
+
+test('main nav screen swipe helpers follow nav tab order and respect inner horizontal boundaries', () => {
+  const horizontalPagerUtils = load('src/utils/horizontalPagerUtils.ts', {});
+  const navTabConstants = load('src/features/navigation/navTabConstants.ts', {});
+  const navSwipe = load('src/features/navigation/navSwipeUtils.ts', {
+    '@/utils/horizontalPagerUtils': horizontalPagerUtils,
+    './navTabConstants': navTabConstants,
+  });
+
+  assert.equal(navSwipe.getNavTabIndex('index'), 0);
+  assert.equal(navSwipe.getNavTabIndex('import-songs'), 4);
+  assert.equal(navSwipe.getAdjacentNavRoute('index', -1), null);
+  assert.equal(navSwipe.getAdjacentNavRoute('index', 1), 'search');
+  assert.equal(navSwipe.getAdjacentNavHref('search', 'prev'), '/');
+  assert.equal(navSwipe.getAdjacentNavHref('search', 'next'), '/library');
+  assert.equal(navSwipe.getAdjacentNavHref('import-songs', 'next'), null);
+
+  assert.equal(
+    navSwipe.resolveNavTabSwipeDirection({ translationX: -64, translationY: 8, velocityX: -400 }),
+    'next'
+  );
+  assert.equal(
+    navSwipe.resolveNavTabSwipeDirection({ translationX: 60, translationY: 6, velocityX: 390 }),
+    'prev'
+  );
+  assert.equal(
+    navSwipe.resolveNavTabSwipeDirection({ translationX: 16, translationY: 48, velocityX: 0 }),
+    null
+  );
+
+  // Inner horizontal pager edges hand off cleanly while middle pages stay locked to the inner pager.
+  assert.equal(
+    navSwipe.canSwipeNavInDirection('search', 'prev', { blockPrev: false, blockNext: true }),
+    true
+  );
+  assert.equal(
+    navSwipe.canSwipeNavInDirection('search', 'next', { blockPrev: false, blockNext: true }),
+    false
+  );
+  assert.equal(
+    navSwipe.canSwipeNavInDirection('search', 'next', { blockPrev: true, blockNext: false }),
+    true
+  );
+  assert.equal(
+    navSwipe.canSwipeNavInDirection('library', 'prev', { blockPrev: false, blockNext: false }),
+    true
+  );
+  assert.equal(
+    navSwipe.canSwipeNavInDirection('import-songs', 'next', { blockPrev: false, blockNext: false }),
+    false
+  );
+});

@@ -4,6 +4,7 @@ AppTopHeaderProfileButton,
 useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
 import { NavImportIcon } from "@/components/OfficialNavIcons";
+import { MainTabSwipeSurface } from "@/features/navigation/MainTabSwipeSurface";
 import Colors from "@/constants/colors";
 import { IS_IOS,IS_WEB } from "@/constants/platform";
 import { triggerImpact } from "@/lib/haptics";
@@ -90,7 +91,8 @@ export function ImportSongsScreen() {
   const { isHeaderElevated, handleHeaderScroll } = useAppTopHeaderScrollElevation();
 
   return (
-    <View style={styles.container}>
+    <MainTabSwipeSurface route="import-songs">
+      <View style={styles.container}>
       {/* Background base */}
       <LinearGradient
         colors={[Colors.background, Colors.background, Colors.background]}
@@ -197,6 +199,7 @@ export function ImportSongsScreen() {
         </View>
       </ScrollView>
     </View>
+    </MainTabSwipeSurface>
   );
 }
 

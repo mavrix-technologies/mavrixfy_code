@@ -45,6 +45,8 @@ interface Props {
   onSongPress?: (song: Song) => void;
   horizontalPadding?: number;
   showSearchSourceMeta?: boolean;
+  subtitle?: string;
+  accessibilityHint?: string;
 }
 
 const SongRow = memo(function SongRow({
@@ -63,6 +65,8 @@ const SongRow = memo(function SongRow({
   onSongPress,
   horizontalPadding,
   showSearchSourceMeta = false,
+  subtitle,
+  accessibilityHint,
 }: Props) {
   const { playSong } = usePlayerRowActions();
   const { isActive, isPlaying } = usePlaybackRowState(song?.id);
@@ -165,6 +169,7 @@ const SongRow = memo(function SongRow({
       delayLongPress={500}
       accessibilityRole="button"
       accessibilityLabel={`${song.title} by ${song.artist}`}
+      accessibilityHint={accessibilityHint}
     >
       {showCover && rowCoverUrl && (
         <View style={styles.coverWrapper}>
@@ -200,7 +205,7 @@ const SongRow = memo(function SongRow({
         </View>
         <View style={styles.artistRow}>
           <Text style={styles.artist} numberOfLines={1}>
-            {song.artist || "Unknown Artist"}
+            {subtitle || song.artist || "Unknown Artist"}
           </Text>
         </View>
       </View>
@@ -295,6 +300,7 @@ const SongRow = memo(function SongRow({
     prevProps.playlistName === nextProps.playlistName &&
     prevProps.horizontalPadding === nextProps.horizontalPadding &&
     prevProps.showSearchSourceMeta === nextProps.showSearchSourceMeta &&
+    prevProps.accessibilityHint === nextProps.accessibilityHint &&
     prevProps.onSongPress === nextProps.onSongPress &&
     Boolean(prevProps.onRemove) === Boolean(nextProps.onRemove) &&
     prevProps.queueKey === nextProps.queueKey &&

@@ -50,6 +50,10 @@ NAV_ITEMS,
 getTabHref,
 type VisibleRoute,
 } from "./navTabConstants";
+import {
+getAdjacentNavRoute,
+resolveNavTabSwipeDirection,
+} from "./navSwipeUtils";
 import { MemoizedNavTabItem } from "./NavTabItem";
 import { useActiveNavTab } from "./useActiveNavTab";
 
@@ -306,6 +310,28 @@ export function AppNavBar({ hidden = false, transitionPreview = false }: AppNavB
   const navLabelSize = isNarrowMobile ? 9.5 : 10.5;
   const navLabelLineHeight = 13;
   const navHorizontalPadding = isNarrowMobile ? 6 : 8;
+
+  const navBarPanGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .enabled(!isWeb && !transitionPreview && !hidden)
+        .activeOffsetX([-16, 16])
+        .failOffsetY([-12, 12])
+        .runOnJS(true)
+        .onEnd((event) => {
+          const direction = resolveNavTabSwipeDirection({
+            translationX: event.translationX,
+            translationY: event.translationY,
+            velocityX: event.velocityX,
+          });
+          if (!direction) return;
+          const targetRoute = getAdjacentNavRoute(activeTab, direction === "prev" ? -1 : 1);
+          if (!targetRoute) return;
+          void triggerImpact(Haptics.ImpactFeedbackStyle.Light);
+          routerNavigate(getTabHref(targetRoute) as any);
+        }),
+    [activeTab, hidden, isWeb, routerNavigate, transitionPreview]
+  );
   const conceptText = "#dfe2eb";
   const conceptSubtext = "#bccbb9";
 
@@ -585,44 +611,46 @@ export function AppNavBar({ hidden = false, transitionPreview = false }: AppNavB
             </Reanimated.View>
           ) : null}
 
-          <Reanimated.View
-            style={[
-              styles.navContent,
-              isIOS && styles.navContentIOS,
-              {
-                backgroundColor: navBaseBg,
-                paddingHorizontal: navHorizontalPadding,
-                height: TAB_BAR_HEIGHT + resolvedBottomInset,
-                paddingBottom: resolvedBottomInset,
-                borderTopWidth: hasActiveMiniPlayer ? StyleSheet.hairlineWidth : 0,
-                borderTopColor: "rgba(255, 255, 255, 0.08)",
-              },
-              !hasActiveMiniPlayer && styles.navContentNavOnly,
-              navStyle,
-              transitionPreview && { display: "none" },
-            ]}
-          >
-            {!transitionPreview && NAV_ITEMS.map((item) => {
-              const isFocused = item.route === activeTab;
+          <GestureDetector gesture={navBarPanGesture}>
+            <Reanimated.View
+              style={[
+                styles.navContent,
+                isIOS && styles.navContentIOS,
+                {
+                  backgroundColor: navBaseBg,
+                  paddingHorizontal: navHorizontalPadding,
+                  height: TAB_BAR_HEIGHT + resolvedBottomInset,
+                  paddingBottom: resolvedBottomInset,
+                  borderTopWidth: hasActiveMiniPlayer ? StyleSheet.hairlineWidth : 0,
+                  borderTopColor: "rgba(255, 255, 255, 0.08)",
+                },
+                !hasActiveMiniPlayer && styles.navContentNavOnly,
+                navStyle,
+                transitionPreview && { display: "none" },
+              ]}
+            >
+              {!transitionPreview && NAV_ITEMS.map((item) => {
+                const isFocused = item.route === activeTab;
 
-              return (
-                <MemoizedNavTabItem
-                  key={item.route}
-                  item={item}
-                  isFocused={isFocused}
-                  isAndroid={isAndroid}
-                  isIOS={isIOS}
-                  navIconSize={navIconSize}
-                  navLabelSize={navLabelSize}
-                  navLabelLineHeight={navLabelLineHeight}
-                  activeNavColor={activeNavColor}
-                  navInactiveColor={navInactiveColor}
-                  onPress={handleTabPress}
-                  onLongPress={noopLongPress}
-                />
-              );
-            })}
-          </Reanimated.View>
+                return (
+                  <MemoizedNavTabItem
+                    key={item.route}
+                    item={item}
+                    isFocused={isFocused}
+                    isAndroid={isAndroid}
+                    isIOS={isIOS}
+                    navIconSize={navIconSize}
+                    navLabelSize={navLabelSize}
+                    navLabelLineHeight={navLabelLineHeight}
+                    activeNavColor={activeNavColor}
+                    navInactiveColor={navInactiveColor}
+                    onPress={handleTabPress}
+                    onLongPress={noopLongPress}
+                  />
+                );
+              })}
+            </Reanimated.View>
+          </GestureDetector>
         </View>
       </View>
     </>

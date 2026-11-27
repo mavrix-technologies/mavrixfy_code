@@ -204,7 +204,8 @@ export async function getRequestedQualityPreference(): Promise<{
 /** Resolve the best playback URL and metadata for a song based on explicit quality entitlement. */
 export async function resolvePlaybackUrlWithDetails(
   song: Song,
-  forcedQuality?: "auto" | "low" | "medium" | "high"
+  forcedQuality?: "auto" | "low" | "medium" | "high",
+  signal?: AbortSignal
 ): Promise<ResolvedPlaybackResult> {
   const { requested, effective, unlocked, preferJioSaavn } = await getRequestedQualityPreference();
   let targetQuality: "low" | "medium" | "high";
@@ -269,7 +270,7 @@ export async function resolvePlaybackUrlWithDetails(
   // An opt-in recording match may supply the audio; song identity stays unchanged.
   if (isYouTubeSong(song)) {
     if (forcedQuality) invalidateYouTubeStream(song);
-    const stream = await resolveYouTubeStream(song, targetQuality, targetQuality !== "low" && preferJioSaavn);
+    const stream = await resolveYouTubeStream(song, targetQuality, targetQuality !== "low" && preferJioSaavn, signal);
     const playableUrl = readAudioCandidate(stream.url);
     if (!playableUrl || isAudioPreviewUrl(playableUrl)) throw new Error("The music provider returned an invalid audio source.");
     const bitrate = Number.isFinite(stream.bitrate) && stream.bitrate > 0 ? Math.round(stream.bitrate / 1000) : 0;
@@ -278,11 +279,14 @@ export async function resolvePlaybackUrlWithDetails(
       unlocked, isFallback: false } };
   }
 
+  let attemptedFullSongResolve = false;
+
   // iTunes / Spotify track audio resolution (E:\ria resolveFullSong pattern)
   if (song.id.startsWith("itunes_") || song.source === "spotify" || song.id.startsWith("sp_")) {
+    attemptedFullSongResolve = true;
     try {
       const { resolveFullSongAudio } = await import("@/services/spotify/SpotifyCatalogService");
-      const resolved = await resolveFullSongAudio(song);
+      const resolved = await resolveFullSongAudio(song, signal);
       const playableUrl = readAudioCandidate(resolved?.url);
       if (resolved && playableUrl && !isAudioPreviewUrl(playableUrl)) {
         return {
@@ -290,13 +294,15 @@ export async function resolvePlaybackUrlWithDetails(
           qualityState: {
             requested: effectiveRequested,
             actualBitrate: resolved.bitrate,
-            qualityLabel: `${resolved.bitrate}kbps`,
+            qualityLabel: Number.isFinite(resolved.bitrate) && resolved.bitrate > 0 ? `${resolved.bitrate}kbps` : "Original audio",
             unlocked,
             isFallback: false,
           },
         };
       }
-    } catch {}
+    } catch (error) {
+      if (signal?.aborted) throw error;
+    }
   }
 
   // Older like caches did not retain audio URLs. Refresh by the original catalog ID,
@@ -348,24 +354,26 @@ export async function resolvePlaybackUrlWithDetails(
     };
   }
 
-  // If candidate was a 30s preview or missing, force resolve full-length 320kbps song
-  try {
-    const { resolveFullSongAudio } = await import("@/services/spotify/SpotifyCatalogService");
-    const resolved = await resolveFullSongAudio(song);
-    const playableUrl = readAudioCandidate(resolved?.url);
-    if (resolved && playableUrl && !isAudioPreviewUrl(playableUrl)) {
-      return {
-        url: playableUrl,
-        qualityState: {
-          requested: effectiveRequested,
-          actualBitrate: resolved.bitrate,
-          qualityLabel: `${resolved.bitrate}kbps`,
-          unlocked,
-          isFallback: false,
-        },
-      };
-    }
-  } catch {}
+  // If candidate was a 30s preview or missing, resolve full-length 320kbps song once.
+  if (!attemptedFullSongResolve && !signal?.aborted) {
+    try {
+      const { resolveFullSongAudio } = await import("@/services/spotify/SpotifyCatalogService");
+      const resolved = await resolveFullSongAudio(song, signal);
+      const playableUrl = readAudioCandidate(resolved?.url);
+      if (resolved && playableUrl && !isAudioPreviewUrl(playableUrl)) {
+        return {
+          url: playableUrl,
+          qualityState: {
+            requested: effectiveRequested,
+            actualBitrate: resolved.bitrate,
+            qualityLabel: Number.isFinite(resolved.bitrate) && resolved.bitrate > 0 ? `${resolved.bitrate}kbps` : "Original audio",
+            unlocked,
+            isFallback: false,
+          },
+        };
+      }
+    } catch {}
+  }
 
   return {
     url: null,
@@ -377,7 +385,7 @@ export async function resolvePlaybackUrlWithDetails(
 }
 
 /** Resolve the best playback URL for a song — local file first, then quality-specific stream, then direct candidate. */
-export async function resolvePlaybackUrl(song: Song): Promise<string | null> {
-  const result = await resolvePlaybackUrlWithDetails(song);
+export async function resolvePlaybackUrl(song: Song, signal?: AbortSignal): Promise<string | null> {
+  const result = await resolvePlaybackUrlWithDetails(song, undefined, signal);
   return result.url;
 }

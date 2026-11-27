@@ -13,6 +13,7 @@ useAppTopHeaderScrollElevation,
 } from "@/components/AppTopHeader";
 import { CollectionHero } from "@/components/CollectionHero";
 import SongRow from "@/components/SongRow";
+import { downloadAudioLabel } from "@/services/audio/audioDiagnostics";
 import { useDownloads } from "@/contexts/DownloadContext";
 import { usePlayerBrowse } from "@/contexts/PlayerContext";
 import { onQueueEvent } from "@/lib/downloads/downloadManager";
@@ -159,6 +160,7 @@ export function DownloadedSongsScreen() {
   }, [filteredSongs, completedSongs, shufflePlay]);
 
   const keyExtractor = songKeyExtractor;
+  const qualityById = useMemo(() => new Map(downloadItems.map(item => [item.songId, downloadAudioLabel(item)])), [downloadItems]);
 
   const renderSong = useCallback(
     ({ item }: { item: Song }) => {
@@ -169,10 +171,11 @@ export function DownloadedSongsScreen() {
           queueKey="downloaded-songs"
           horizontalPadding={8}
           showDownload={false}
+          subtitle={`${qualityById.get(item.id) || "Quality unknown"} · ${item.artist}`}
         />
       );
     },
-    [filteredSongs]
+    [filteredSongs, qualityById]
   );
 
   const getItemLayout = useCallback(

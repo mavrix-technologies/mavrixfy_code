@@ -233,7 +233,7 @@ function EqualizerControlsSection({
           <Switch
             value={enabled}
             onValueChange={onToggle}
-            disabled={!equalizerReady && !enabled}
+            disabled={!equalizerReady}
             trackColor={{ false: "#3E3E3E", true: Colors.primary }}
             thumbColor="#FFFFFF"
           />
@@ -287,12 +287,14 @@ function useEqualizerState() {
   const [isDragging, setIsDragging] = useState(false);
   const [activeBandIdx, setActiveBandIdx] = useState<number | null>(null);
   const activeBandIndexRef = useRef<number | null>(null);
-  const equalizerReady = settings !== null;
-  const effectsError = equalizerSupported() ? null : "Presets are saved. Audio effects currently require an Android development build or installed APK. This iOS player and Expo Go do not support EQ processing.";
+  const equalizerReady = settings !== null && equalizerSupported() && !settings.originalSoundEnabled;
+  const effectsError = !equalizerSupported()
+    ? "Equalizer is unavailable on this player. Your saved presets are preserved; iOS and Expo Go play without these effects."
+    : settings?.originalSoundEnabled ? "Original sound is on. Turn it off in Playback settings to adjust the equalizer." : null;
   useEffect(() => {
     let mounted = true;
     void getSettings().then(saved => { if (mounted) {
-      const initial = { equalizer: saved.equalizer, equalizerEnabled: saved.equalizerEnabled };
+      const initial = { equalizer: saved.equalizer, equalizerEnabled: saved.equalizerEnabled, originalSoundEnabled: saved.originalSoundEnabled, normalizeVolume: saved.normalizeVolume };
       current.current = initial; setSettings(initial);
     } })
       .catch(() => Alert.alert("Settings unavailable", "Please reopen the equalizer."));
@@ -308,7 +310,7 @@ function useEqualizerState() {
     const hz = EQ_FREQUENCIES_HZ.reduce((nearest, value) => Math.abs(Math.log(band.hz / value)) < Math.abs(Math.log(band.hz / nearest)) ? value : nearest);
     return [band.key, settings?.equalizer[`${hz}Hz`] ?? 0];
   })), [settings]);
-  const enabled = Boolean(settings?.equalizerEnabled);
+  const enabled = Boolean(equalizerReady && settings?.equalizerEnabled);
   const activePresetId = settings ? detectMatchingPreset(settings.equalizer) : null;
   const handleToggle = useCallback((enabled: boolean) => update({ ...current.current, equalizerEnabled: enabled }, true), [update]);
   const handleSelectPreset = useCallback((preset: EqualizerPreset) => {

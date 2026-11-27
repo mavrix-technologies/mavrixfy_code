@@ -148,6 +148,9 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>Recently Played</Text>
+        <Pressable onPress={() => router.push("/listening-history" as any)} accessibilityRole="button" accessibilityLabel="Search listening history" hitSlop={10}>
+          <Text style={styles.recentSubtitle}>See all</Text>
+        </Pressable>
       </View>
 
       <FlatList
@@ -155,6 +158,9 @@ export const HomeRecentlyPlayed = memo(function HomeRecentlyPlayed({
         keyExtractor={keyExtractor}
         renderItem={renderItem}
         horizontal
+        nestedScrollEnabled
+        directionalLockEnabled
+        overScrollMode="never"
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.listContent}
         ItemSeparatorComponent={ItemSeparatorComponent}
@@ -173,6 +179,9 @@ const styles = StyleSheet.create({
     marginVertical: 12,
   },
   header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 16,
     marginBottom: 10,
   },

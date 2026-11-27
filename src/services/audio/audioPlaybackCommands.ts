@@ -42,7 +42,7 @@ interface UseAudioPlaybackCommandsOptions {
   setSeekOverride: (override: SeekOverride) => void;
   setNativePosition: (pos: number) => void;
   streamUrlCache: MutableRefObject<Map<string, string>>;
-  resolvePlaybackUrlCached: (song: Song) => Promise<string | null>;
+  resolvePlaybackUrlCached: (song: Song, forcedQuality?: "auto" | "low" | "medium" | "high", signal?: AbortSignal) => Promise<string | null>;
   prefetchAdjacentTrackStreams: (queue: Song[], index: number) => void;
   enqueueNativeQueueMutation: (op: () => Promise<void>) => Promise<void>;
   TrackPlayer: NativePlaybackPlayer | null;
@@ -60,6 +60,41 @@ interface UseAudioPlaybackCommandsOptions {
   autoplaySongIdsRef?: MutableRefObject<string[]>;
   lastAutoplaySeedIdRef?: MutableRefObject<string | null>;
   sleepTimerRef?: MutableRefObject<any>;
+}
+
+type ResolutionCancellationToken = {
+  signal: AbortSignal;
+  abort: () => void;
+};
+
+function createResolutionCancellationToken(): ResolutionCancellationToken {
+  if (typeof AbortController === "function") {
+    const controller = new AbortController();
+    return { signal: controller.signal, abort: () => controller.abort() };
+  }
+  const listeners = new Set<() => void>();
+  const state = { aborted: false };
+  const signal = {
+    get aborted() {
+      return state.aborted;
+    },
+    addEventListener: (_type: string, callback: () => void) => {
+      if (state.aborted) callback();
+      else listeners.add(callback);
+    },
+    removeEventListener: (_type: string, callback: () => void) => {
+      listeners.delete(callback);
+    },
+  } as unknown as AbortSignal;
+  return {
+    signal,
+    abort: () => {
+      if (state.aborted) return;
+      state.aborted = true;
+      listeners.forEach((callback) => callback());
+      listeners.clear();
+    },
+  };
 }
 
 export function useAudioPlaybackCommands({
@@ -108,10 +143,18 @@ export function useAudioPlaybackCommands({
   sleepTimerRef,
 }: UseAudioPlaybackCommandsOptions) {
   const seekGenerationRef = useRef(0);
+  const activeResolutionAbortRef = useRef<ResolutionCancellationToken | null>(null);
+  useEffect(() => () => {
+    activeResolutionAbortRef.current?.abort();
+    activeResolutionAbortRef.current = null;
+  }, []);
   const playSong = useCallback(
     async (song: Song, requestedQueue?: Song[], startPositionSeconds?: number, sourceRequestId?: number) => {
       if (!song?.id) return;
       const scope = getAccountScope();
+      activeResolutionAbortRef.current?.abort();
+      const resolutionController = createResolutionCancellationToken();
+      activeResolutionAbortRef.current = resolutionController;
       const reqId = ++playRequestIdRef.current;
       pendingPlayRequestRef.current = {
         id: reqId,
@@ -213,15 +256,30 @@ export function useAudioPlaybackCommands({
         }).catch(() => {});
       }, 800);
 
+      const resolveWithTimeout = (timeoutMs: number) => {
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        return Promise.race([
+          resolvePlaybackUrlCached(targetSong, undefined, resolutionController.signal),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              resolutionController.abort();
+              reject(new Error("Audio stream resolution timed out."));
+            }, timeoutMs);
+          }),
+        ]).finally(() => clearTimeout(timer));
+      };
+
+      const initialBudgetMs =
+        isYouTubeSong(targetSong) || targetSong.source === "spotify" || targetSong.id.startsWith("sp_") || targetSong.id.startsWith("itunes_")
+          ? 22000
+          : 10000;
+
       try {
-        let resolutionTimer: ReturnType<typeof setTimeout> | undefined;
         let audioUrl: string | null = null;
         try {
-          audioUrl = await Promise.race([
-          resolvePlaybackUrlCached(targetSong),
-          new Promise<never>((_, reject) => { resolutionTimer = setTimeout(() => reject(new Error("Audio stream resolution timed out.")), (isYouTubeSong(targetSong) || targetSong.source === "spotify" || targetSong.id.startsWith("sp_") || targetSong.id.startsWith("itunes_")) ? 27000 : 12000); }),
-          ]).finally(() => clearTimeout(resolutionTimer));
+          audioUrl = await resolveWithTimeout(initialBudgetMs);
         } catch (initialResolutionError) {
+          if (resolutionController.signal.aborted && reqId !== playRequestIdRef.current) return;
           const detail = youTubePlaybackErrorDetails(initialResolutionError);
           const extractionFailure = initialResolutionError as { retryExhausted?: boolean; code?: string } | null;
           const extractionStopsRecovery = (isYouTubeSong(targetSong) || targetSong.source === "spotify") &&
@@ -233,11 +291,18 @@ export function useAudioPlaybackCommands({
           updatePlaybackEngineSnapshot({ isReconnecting: true });
           await new Promise<void>(resolve => setTimeout(resolve, 1200));
           if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope) || !desiredPlayStateRef.current) return;
-          // One recovery attempt for the selected track; native owns rebuffering once loaded.
+          // One recovery attempt for the selected track with a fresh controller
+          const retryController = createResolutionCancellationToken();
+          activeResolutionAbortRef.current = retryController;
           let retryTimer: ReturnType<typeof setTimeout> | undefined;
           audioUrl = await Promise.race([
-            resolvePlaybackUrlCached(targetSong),
-            new Promise<never>((_, reject) => { retryTimer = setTimeout(() => reject(new Error("Audio stream resolution timed out.")), 15000); }),
+            resolvePlaybackUrlCached(targetSong, undefined, retryController.signal),
+            new Promise<never>((_, reject) => {
+              retryTimer = setTimeout(() => {
+                retryController.abort();
+                reject(new Error("Audio stream resolution timed out."));
+              }, 15000);
+            }),
           ]).finally(() => clearTimeout(retryTimer));
         }
         if (reqId !== playRequestIdRef.current || !isCurrentAccount(scope)) return;
@@ -301,6 +366,21 @@ export function useAudioPlaybackCommands({
                   else await TrackPlayer!.play();
                   return;
                 }
+                if (
+                  sourceRequestId != null &&
+                  nativeTrack?.id === targetSong.id &&
+                  typeof TrackPlayer!.updateCurrentTrack === "function"
+                ) {
+                  await TrackPlayer!.updateCurrentTrack(targetIndex, targetTrack);
+                  if (reqId !== playRequestIdRef.current) return;
+                  if (initialPos > 0 && typeof TrackPlayer!.seekTo === "function") {
+                    await TrackPlayer!.seekTo(initialPos).catch(() => {});
+                  }
+                  if (reqId !== playRequestIdRef.current) return;
+                  if (desiredPlayStateRef.current === false) await TrackPlayer!.pause();
+                  else await TrackPlayer!.play();
+                  return;
+                }
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
               } catch {
                 if (isNativeQueueSyncedRef) isNativeQueueSyncedRef.current = false;
@@ -341,7 +421,6 @@ export function useAudioPlaybackCommands({
           });
 
           if (reqId !== playRequestIdRef.current) return;
-          prefetchAdjacentTrackStreams(q, targetIndex);
         } else if (canUseLightweightAudioFallback) {
           if (reqId !== playRequestIdRef.current) return;
           const shouldPlay = () => reqId === playRequestIdRef.current && isCurrentAccount(scope) && desiredPlayStateRef.current !== false;

@@ -357,7 +357,7 @@ export const SPOTIFY_PODCASTS: SpotifyPodcast[] = [
   },
 ];
 
-const spotifyPlaylistCache = new Map<string, Song[]>();
+const spotifyPlaylistCache = new Map<string, { at: number; songs: Song[] }>();
 const trackCoverCache = new Map<string, string>();
 
 async function resolveTrackCover(tid: string | null, fallback: string): Promise<string> {
@@ -378,7 +378,7 @@ async function resolveTrackCover(tid: string | null, fallback: string): Promise<
         return hd;
       }
     }
-  } catch {}
+  } catch { }
   return fallback;
 }
 
@@ -386,18 +386,24 @@ async function resolveTrackCover(tid: string | null, fallback: string): Promise<
  * Scrapes real authentic Spotify tracks directly from Spotify's embed page
  * Resolves each track's authentic 640x640 album artwork via Spotify oEmbed in parallel.
  */
-export async function fetchLiveSpotifyPlaylistTracks(spotifyIdOrPresetId: string): Promise<Song[]> {
+export async function fetchLiveSpotifyPlaylistTracks(spotifyIdOrPresetId: string, options: { forceRefresh?: boolean; signal?: AbortSignal } = {}): Promise<Song[]> {
   const preset = SPOTIFY_PRESETS.find((p) => p.id === spotifyIdOrPresetId || p.spotifyId === spotifyIdOrPresetId);
-  const cleanId = preset?.spotifyId || spotifyIdOrPresetId.replace(/^(pl_|sp_)/, "");
+  const cleanId = spotifyPlaylistId(spotifyIdOrPresetId);
   if (!cleanId) return [];
 
-  if (spotifyPlaylistCache.has(cleanId)) {
-    return spotifyPlaylistCache.get(cleanId)!;
-  }
+  const cached = spotifyPlaylistCache.get(cleanId);
+  if (!options.forceRefresh && cached && Date.now() - cached.at < 10 * 60_000) return cached.songs;
+  if (options.signal?.aborted) return [];
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  options.signal?.addEventListener("abort", cancel, { once: true });
+  const timer = setTimeout(cancel, 4500);
 
   try {
     const url = `https://open.spotify.com/embed/playlist/${cleanId}`;
     const res = await fetch(url, {
+      signal: controller.signal,
+      cache: options.forceRefresh ? "no-store" : "default",
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -412,12 +418,6 @@ export async function fetchLiveSpotifyPlaylistTracks(spotifyIdOrPresetId: string
     const entity = data.props?.pageProps?.state?.data?.entity;
     if (!entity || !Array.isArray(entity.trackList)) return [];
 
-    const coverUrl =
-      entity.coverArt?.sources?.[0]?.url ||
-      entity.visualIdentity?.image?.[0]?.url ||
-      preset?.coverUrl ||
-      "https://i.scdn.co/image/ab67706f00000002b30d7e201b1c0085357deb4a";
-
     const tracks: Song[] = await Promise.all(
       entity.trackList
         .filter((t: any) => t && t.title && t.title.trim() !== "")
@@ -425,7 +425,8 @@ export async function fetchLiveSpotifyPlaylistTracks(spotifyIdOrPresetId: string
           const durSec = Math.round((t.duration || 180000) / 1000);
           const tid = t.uri ? t.uri.split(":")[2] : null;
           const cleanTid = tid || Math.random().toString(36).slice(2);
-          const trackCover = await resolveTrackCover(tid, coverUrl);
+          const ownCover = t.coverArt?.sources?.[0]?.url || t.album?.images?.[0]?.url || "";
+          const trackCover = ownCover || await resolveTrackCover(tid, "");
           return {
             id: `sp_${cleanTid}`,
             title: t.title,
@@ -442,13 +443,67 @@ export async function fetchLiveSpotifyPlaylistTracks(spotifyIdOrPresetId: string
     );
 
     if (tracks.length > 0) {
-      spotifyPlaylistCache.set(cleanId, tracks);
-      if (preset?.id) spotifyPlaylistCache.set(preset.id, tracks);
+      spotifyPlaylistCache.set(cleanId, { at: Date.now(), songs: tracks });
+      if (spotifyPlaylistCache.size > 30) spotifyPlaylistCache.delete(spotifyPlaylistCache.keys().next().value!);
     }
     return tracks;
   } catch {
     return [];
+  } finally {
+    clearTimeout(timer);
+    options.signal?.removeEventListener("abort", cancel);
   }
+}
+
+export function spotifyPlaylistId(value: string): string | null {
+  const preset = SPOTIFY_PRESETS.find(p => p.id === value);
+  if (preset) return preset.spotifyId || null;
+  const raw = value.match(/open\.spotify\.com\/(?:intl-[^/]+\/)?playlist\/([a-zA-Z0-9]{22})(?:[?/#]|$)/)?.[1]
+    || value.replace(/^sp_/, "");
+  return /^[a-zA-Z0-9]{22}$/.test(raw) ? raw : null;
+}
+
+const playlistMetadataCache = new Map<string, { at: number; name: string; cover: string }>();
+export async function fetchSpotifyPlaylistMetadata(value: string, forceRefresh = false): Promise<{ name: string; cover: string } | null> {
+  const id = spotifyPlaylistId(value);
+  if (!id) return null;
+  const cached = playlistMetadataCache.get(id);
+  if (!forceRefresh && cached && Date.now() - cached.at < 10 * 60_000) return cached;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 1500);
+  try {
+    const response = await fetch(`https://open.spotify.com/oembed?url=${encodeURIComponent(`https://open.spotify.com/playlist/${id}`)}`, { signal: controller.signal });
+    if (!response.ok) return null;
+    const data = await response.json();
+    if (typeof data.thumbnail_url !== "string" || !data.thumbnail_url.startsWith("https://")) return null;
+    const result = { at: Date.now(), name: typeof data.title === "string" ? data.title.trim() : "", cover: data.thumbnail_url };
+    playlistMetadataCache.set(id, result);
+    if (playlistMetadataCache.size > 60) playlistMetadataCache.delete(playlistMetadataCache.keys().next().value!);
+    return result;
+  } catch { return null; }
+  finally { clearTimeout(timer); }
+}
+
+export async function enrichSpotifyPlaylistArtwork<T extends { id: string; name: string; image: PlaylistResult["image"]; url?: string }>(items: T[], forceRefresh = false): Promise<T[]> {
+  const seen = new Set<string>();
+  const result = items.filter(item => {
+    const key = spotifyPlaylistId(item.url || "") || spotifyPlaylistId(item.id) || item.id;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+  let next = 0;
+  await Promise.all(Array.from({ length: Math.min(4, result.length) }, async () => {
+    while (next < result.length) {
+      const index = next++;
+      const item = result[index];
+      const metadata = await fetchSpotifyPlaylistMetadata(item.url || item.id, forceRefresh);
+      if (metadata) result[index] = {
+        ...item, name: metadata.name || item.name,
+        image: [{ quality: "500x500", url: metadata.cover }]
+      };
+    }
+  }));
+  return result;
 }
 
 export function searchSpotifyPlaylists(query: string): PlaylistResult[] {
@@ -459,6 +514,7 @@ export function searchSpotifyPlaylists(query: string): PlaylistResult[] {
   const words = q.split(/\s+/).filter(Boolean);
 
   const matched = SPOTIFY_PRESETS.filter((item) => {
+    if (!item.spotifyId) return false;
     if (isGenericSpotify) return true;
     const name = item.name.toLowerCase();
     const desc = item.description.toLowerCase();
@@ -496,7 +552,12 @@ export function searchSpotifyPlaylists(query: string): PlaylistResult[] {
     description: `Podcast · ${p.publisher} · ${p.description}`,
   }));
 
-  return [...matched, ...matchedPodcasts];
+  const seen = new Set<string>();
+  return [...matched, ...matchedPodcasts].filter(item => {
+    const key = item.url || item.id;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
 }
 
 /**
@@ -653,9 +714,32 @@ export async function searchLiveITunesArtists(query: string, limit = 10, signal?
   }
 }
 
+const IN_FLIGHT_FULL_SONG = new Map<string, Promise<{ url: string; bitrate: number } | null>>();
+
 /** Existing playback order: catalog URL, JioSaavn high-quality audio, then YouTube. */
-export async function resolveFullSongAudio(song: Song): Promise<{ url: string; bitrate: number } | null> {
-  const cleanTitle = song.title.replace(/\(.*?\)/g, "").replace(/\[.*?\]/g, "").replace(/\{.*?\}/g, "").trim();
+export async function resolveFullSongAudio(
+  song: Song,
+  signal?: AbortSignal
+): Promise<{ url: string; bitrate: number } | null> {
+  if (signal?.aborted) return null;
+  const key = song.id || `${song.title}:${song.artist}`;
+  const existing = key ? IN_FLIGHT_FULL_SONG.get(key) : undefined;
+  if (existing) return existing;
+
+  const task = resolveFullSongAudioUncached(song, signal).finally(() => {
+    if (key && IN_FLIGHT_FULL_SONG.get(key) === task) {
+      IN_FLIGHT_FULL_SONG.delete(key);
+    }
+  });
+  if (key) IN_FLIGHT_FULL_SONG.set(key, task);
+  return task;
+}
+
+async function resolveFullSongAudioUncached(
+  song: Song,
+  signal?: AbortSignal
+): Promise<{ url: string; bitrate: number } | null> {
+  const cleanTitle = song.title.trim();
   const primaryArtist = (song.artist || "").split(/[,&]/)[0].trim();
   const searchQ = `${cleanTitle} ${primaryArtist}`.trim();
 
@@ -665,17 +749,31 @@ export async function resolveFullSongAudio(song: Song): Promise<{ url: string; b
       const { resolveAudioStreamWithQuality } = await import("@/lib/musicData");
       const stream = resolveAudioStreamWithQuality(song.downloadUrl, "high");
       if (stream?.url && !isAudioPreviewUrl(stream.url)) {
-        return { url: stream.url, bitrate: stream.bitrate || 320 };
+        return { url: stream.url, bitrate: Number.isFinite(stream.bitrate) && stream.bitrate > 0 ? stream.bitrate : 0 };
       }
-    } catch {}
+    } catch { }
   }
 
-  // 2. HIGHEST QUALITY PRIORITY: 320kbps Master Stream from JioSaavn CDN
+  // 2. HIGHEST QUALITY PRIORITY: Verified 320kbps Master Stream from JioSaavn CDN
+  const [
+    { matchesJioSaavnRecording },
+    { resolveAudioStreamWithQuality },
+    { toDurationSeconds },
+  ] = await Promise.all([
+    import("@/services/audio/preferredJioSaavnStream"),
+    import("@/lib/musicData"),
+    import("@/utils/timeFormatters"),
+  ]);
 
-  const queries = [searchQ, cleanTitle].filter(Boolean);
-  for (const q of queries) {
+  const queries = [searchQ, ...(cleanTitle && cleanTitle !== searchQ ? [cleanTitle] : [])].filter(Boolean);
+  for (let qIdx = 0; qIdx < queries.length; qIdx += 1) {
+    if (signal?.aborted) return null;
+    const q = queries[qIdx];
     try {
-      const resp = await fetchAppApi(`/search/songs?query=${encodeURIComponent(q)}&limit=5`);
+      const resp = await Promise.race([
+        fetchAppApi(`/search/songs?query=${encodeURIComponent(q)}&limit=6&country=IN`, { signal }),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 4500)),
+      ]);
       if (resp?.ok) {
         const payload = await resp.json();
         const results = [
@@ -689,97 +787,46 @@ export async function resolveFullSongAudio(song: Song): Promise<{ url: string; b
 
         for (const raw of results) {
           if (!raw?.downloadUrl) continue;
-          const dl = Array.isArray(raw.downloadUrl) ? raw.downloadUrl : [];
-          const best = dl.find((d: any) => d.quality === "320kbps") || dl[dl.length - 1];
-          const streamUrl = best?.url || best?.link;
-          if (streamUrl && typeof streamUrl === "string" && streamUrl.startsWith("http") && !isAudioPreviewUrl(streamUrl)) {
-            return { url: streamUrl, bitrate: 320 };
+          const candidate = {
+            title: String(raw.name || raw.title || ""),
+            artist: typeof raw.primaryArtists === "string"
+              ? raw.primaryArtists
+              : raw.artists?.primary?.map((artist: { name: string }) => artist.name).join(", ") || String(raw.artist || ""),
+            duration: toDurationSeconds(raw.duration),
+          } as Song;
+          if (!matchesJioSaavnRecording(song, candidate)) continue;
+          const best = resolveAudioStreamWithQuality(raw.downloadUrl, "high");
+          const streamUrl = best?.url;
+          if (streamUrl && best.bitrate >= 256 && streamUrl.startsWith("http") && !isAudioPreviewUrl(streamUrl)) {
+            return { url: streamUrl, bitrate: best.bitrate };
           }
         }
+        // Only try secondary fallback query when the first query returned zero rows
+        if (qIdx === 0 && results.length > 0) break;
       }
-    } catch {}
+    } catch { }
   }
 
-  // 3. Spotify Audio Engine: Resolve via YouTube Audio Stream (VISIONOS Unblocked Transport)
+  if (signal?.aborted) return null;
 
-  // 0. Query mavrixfy-song-api resolve-full-song endpoint
-  try {
-    const resp = await fetchAppApi(`/spotify/resolve-full-song?query=${encodeURIComponent(searchQ)}`);
-    if (resp?.ok) {
-      const json = await resp.json();
-      if (json?.data?.streamUrl && !isAudioPreviewUrl(json.data.streamUrl)) {
-        return { url: json.data.streamUrl, bitrate: json.data.bitrate || 320 };
-      }
-      if (json?.data?.videoId) {
-        const { resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
-        const ytSong: Song = {
-          id: `youtube_${json.data.videoId}`,
-          title: song.title,
-          artist: song.artist,
-          album: song.album || "Spotify Single",
-          duration: song.duration,
-          coverUrl: song.coverUrl,
-          audioUrl: "",
-          source: "spotify",
-          genre: song.genre || "Music",
-          youtubeVideoId: json.data.videoId,
-        };
-        const stream = await resolveYouTubeStream(ytSong, "high", true);
-        if (stream?.url && !isAudioPreviewUrl(stream.url)) {
-          const kbps = Math.round((stream.bitrate || 320000) / 1000);
-          return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
-        }
-      }
-    }
-  } catch {}
-
-  // A. Direct YouTube Audio Scraper
-  try {
-    const searchUrl = `https://www.youtube.com/results?search_query=${encodeURIComponent(searchQ + " Audio Song")}`;
-    const yres = await fetch(searchUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      },
-    });
-    if (yres.ok) {
-      const text = await yres.text();
-      const match = text.match(/"videoId":"([a-zA-Z0-9_-]{11})"/);
-      if (match && match[1]) {
-        const { resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
-        const ytSong: Song = {
-          id: `youtube_${match[1]}`,
-          title: song.title,
-          artist: song.artist,
-          album: song.album || "Spotify Single",
-          duration: song.duration,
-          coverUrl: song.coverUrl,
-          audioUrl: "",
-          source: "spotify",
-          genre: song.genre || "Music",
-          youtubeVideoId: match[1],
-        };
-        const stream = await resolveYouTubeStream(ytSong, "high", true);
-        if (stream?.url && !isAudioPreviewUrl(stream.url)) {
-          const kbps = Math.round((stream.bitrate || 320000) / 1000);
-          return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
-        }
-      }
-    }
-  } catch {}
-
-  // B. YouTube Music search
+  // Only consider candidates whose recording metadata matches the requested song.
+  // A first search result, bare video ID or unlabelled server URL is not proof
+  // of the same recording and must never silently replace the requested version.
   try {
     const { searchYouTubeMusic, resolveYouTubeStream } = await import("@/services/youtube/YouTubeMusic");
-    const ytResults = await searchYouTubeMusic(searchQ, "songs");
-    const topSong = ytResults.songs?.[0];
-    if (topSong) {
-      const stream = await resolveYouTubeStream({ ...topSong, source: "spotify" }, "high", true);
-      if (stream?.url && !isAudioPreviewUrl(stream.url)) {
-        const kbps = Math.round((stream.bitrate || 320000) / 1000);
-        return { url: stream.url, bitrate: kbps > 0 ? kbps : 320 };
-      }
+    const results = await searchYouTubeMusic(searchQ, "songs", signal);
+    const candidates = results.songs.filter(candidate => matchesJioSaavnRecording(song, candidate)).slice(0, 2);
+    for (const candidate of candidates) {
+      if (signal?.aborted) return null;
+      try {
+        const stream = await resolveYouTubeStream(candidate, "high", false, signal);
+        if (stream?.url && !isAudioPreviewUrl(stream.url)) {
+          const kbps = Number.isFinite(stream.bitrate) ? Math.round(stream.bitrate / 1000) : 0;
+          return { url: stream.url, bitrate: Math.max(0, kbps) };
+        }
+      } catch { /* Another verified match may still be available. */ }
     }
-  } catch {}
+  } catch { }
 
   return null;
 }

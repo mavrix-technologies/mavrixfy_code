@@ -160,33 +160,29 @@ export async function fetchAppApi(path: string, init?: RequestInit): Promise<Res
   const apiPath = normalizedPath.startsWith("/api/") ? normalizedPath : `/api${normalizedPath}`;
   const fallbackUrl = `https://mavrixfy-song-api.vercel.app${apiPath}`;
 
-  try {
+  async function attempt(url: string, timeoutMs: number): Promise<Response> {
+    if (init?.signal?.aborted) throw new Error("Request cancelled");
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 3500);
-    const mergedSignal = init?.signal
-      ? (AbortSignal.any ? AbortSignal.any([init.signal, controller.signal]) : controller.signal)
-      : controller.signal;
-
-    const res = await fetch(primaryUrl, { ...init, signal: mergedSignal });
-    clearTimeout(timeoutId);
-    if (res.ok) return res;
-  } catch {}
-
-  if (primaryUrl !== fallbackUrl) {
+    const cancel = () => controller.abort();
+    init?.signal?.addEventListener("abort", cancel, { once: true });
+    const timeoutId = setTimeout(cancel, timeoutMs);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3500);
-      const res = await fetch(fallbackUrl, { ...init, signal: controller.signal });
+      return await fetch(url, { ...init, signal: controller.signal });
+    } finally {
       clearTimeout(timeoutId);
-      if (res.ok) return res;
-    } catch {}
+      init?.signal?.removeEventListener("abort", cancel);
+    }
   }
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 3000);
-  try {
-    return await fetch(primaryUrl, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeoutId);
+  const urls = primaryUrl === fallbackUrl ? [primaryUrl, primaryUrl] : [primaryUrl, fallbackUrl, primaryUrl];
+  for (let index = 0; index < urls.length; index++) {
+    if (init?.signal?.aborted) throw new Error("Request cancelled");
+    try {
+      const response = await attempt(urls[index], index === urls.length - 1 ? 3000 : 3500);
+      if (response.ok || index === urls.length - 1) return response;
+    } catch (error) {
+      if (init?.signal?.aborted || index === urls.length - 1) throw error;
+    }
   }
+  throw new Error("Request failed");
 }

@@ -538,6 +538,28 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
               }
               return false;
             };
+            const isCleanOriginalAudioTrack = (format: { is_dubbed?: boolean; is_auto_dubbed?: boolean; is_descriptive?: boolean; is_secondary?: boolean }) =>
+              !format.is_dubbed && !format.is_auto_dubbed && !format.is_descriptive && !format.is_secondary;
+            const filterPreferredAudioFormats = <T extends {
+              mime_type: string; is_drc?: boolean; is_vb?: boolean; is_original?: boolean;
+              is_dubbed?: boolean; is_auto_dubbed?: boolean; is_descriptive?: boolean; is_secondary?: boolean;
+              audio_track?: { audio_is_default?: boolean };
+            }>(list: T[]) => {
+              let pool = list;
+              const nonDrc = pool.filter(format => !format.is_drc && !format.is_vb);
+              if (nonDrc.length) pool = nonDrc;
+              const nonDubbed = pool.filter(isCleanOriginalAudioTrack);
+              if (nonDubbed.length) pool = nonDubbed;
+              if (pool.some(format => Boolean(format.audio_track))) {
+                const defaults = pool.filter(format => format.is_original || format.audio_track?.audio_is_default === true);
+                if (defaults.length) pool = defaults;
+              }
+              if (quality !== "low") {
+                const nonHeAac = pool.filter(format => !/\bmp4a\.40\.5\b/i.test(format.mime_type));
+                if (nonHeAac.length) pool = nonHeAac;
+              }
+              return pool;
+            };
 
             const compatibleFormats = [...(info.streaming_data?.adaptive_formats || []), ...(video ? info.streaming_data?.formats || [] : [])]
               .filter(format => (video
@@ -545,7 +567,8 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
                 : isAudioFormatCompatible(format)
               ))
               .sort((a, b) => a.bitrate - b.bitrate);
-            const formats = compatibleFormats.filter(format => format.url || format.signature_cipher || format.cipher);
+            const rawFormats = compatibleFormats.filter(format => format.url || format.signature_cipher || format.cipher);
+            const formats = video ? rawFormats : filterPreferredAudioFormats(rawFormats);
             if (!formats.length) throw new YouTubeExtractionError(
               !compatibleFormats.length && info.streaming_data?.adaptive_formats.some(format => format.has_audio) ? "UNSUPPORTED_FORMAT" : "NO_DIRECT_AUDIO_URL", stage,
               video ? "No compatible H.264 video stream" : "No compatible audio stream");
@@ -559,7 +582,16 @@ function resolveMediaStream(videoId: string, quality: string, id: string, video 
             for (const candidate of candidates.slice(0, 2)) {
               try {
                 stage = "format";
-                const format = info.chooseFormat({ itag: candidate.itag, type: video ? "video" : "audio" });
+                const chosen = info.chooseFormat({ itag: candidate.itag, type: video ? "video" : "audio" });
+                // youtubei.js chooseFormat({ itag }) returns the first format sharing that itag,
+                // which may be a DRC or dubbed duplicate when YouTube serves variants on the same itag.
+                const chosenMismatchedAudio = !video && chosen && (
+                  (chosen.is_drc && !candidate.is_drc) ||
+                  (chosen.is_vb && !candidate.is_vb) ||
+                  (!isCleanOriginalAudioTrack(chosen) && isCleanOriginalAudioTrack(candidate)) ||
+                  (chosen.audio_track?.audio_is_default === false && candidate.audio_track?.audio_is_default === true)
+                );
+                const format = chosenMismatchedAudio ? candidate : (chosen || candidate);
                 let url = format.url;
                 if (!url) {
                   stage = "decipher";

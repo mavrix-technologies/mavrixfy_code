@@ -35,6 +35,7 @@ DisplayPlaylist,
 PlaylistListItem,
 } from "../components/PlaylistListItem";
 import { useLibraryData } from "../hooks/useLibraryData";
+import { MainTabSwipeSurface } from "@/features/navigation/MainTabSwipeSurface";
 
 type CreateTileItem = { id: "__library_create_tile__"; isCreateTile: true };
 type LibraryListItem = DisplayPlaylist | CreateTileItem;
@@ -267,6 +268,7 @@ export function LibraryScreen() {
 
 
   return (isLoading && playlists.length === 0 ? (
+    <MainTabSwipeSurface route="library">
       <View style={styles.container}>
         <LinearGradient
           colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
@@ -285,7 +287,9 @@ export function LibraryScreen() {
           <SongRowSkeleton count={6} />
         </View>
       </View>
+    </MainTabSwipeSurface>
   ) : (
+    <MainTabSwipeSurface route="library">
     <View style={styles.container}>
       <LinearGradient
         colors={[Colors.backgroundGradientStart, Colors.background, Colors.background]}
@@ -346,6 +350,7 @@ export function LibraryScreen() {
         onClose={resetCreateModal}
       />
     </View>
+    </MainTabSwipeSurface>
   ));}
 
 export default LibraryScreen;

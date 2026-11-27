@@ -80,6 +80,7 @@ export interface AutoRefreshContext {
   slot: AutoRefreshTimeSlot;
   isWeekend: boolean;
   languageBias: "hindi" | "punjabi" | "english";
+  preferredLanguages?: string[];
   cacheFingerprint: string;
 }
 

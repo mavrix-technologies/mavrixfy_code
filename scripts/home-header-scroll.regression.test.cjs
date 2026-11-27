@@ -4,9 +4,36 @@ const fs = require("node:fs");
 const vm = require("node:vm");
 const ts = require("typescript");
 
+function loadTs(filename, dependencies = {}) {
+  const module = { exports: {} };
+  const code = ts.transpileModule(fs.readFileSync(filename, "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  vm.runInNewContext(code, {
+    module,
+    exports: module.exports,
+    require(name) {
+      if (!(name in dependencies)) throw new Error(`Unexpected runtime import: ${name}`);
+      return dependencies[name];
+    },
+  });
+  return module.exports;
+}
+
+function loadHomePresentation() {
+  return loadTs("src/features/home/hooks/homePresentation.ts");
+}
+
+function loadHomeCategoryPagerUtils() {
+  const horizontalPagerUtils = loadTs("src/utils/horizontalPagerUtils.ts");
+  return loadTs("src/features/home/utils/homeCategoryPagerUtils.ts", {
+    "@/utils/horizontalPagerUtils": horizontalPagerUtils,
+  });
+}
+
 function loadHeader() {
   const jsx = (type, props) => ({ type, props });
-  const react = { memo: fn => fn, useCallback: fn => fn, useMemo: fn => fn() };
+  const react = { memo: fn => fn, useCallback: fn => fn, useMemo: fn => fn(), useRef: initial => ({ current: initial }), useEffect: fn => fn() };
   const imports = {
     react,
     "react/jsx-runtime": { jsx, jsxs: jsx },
@@ -47,7 +74,30 @@ function children(tree) {
 }
 
 function find(tree, type) {
-  return tree.type === type ? tree : children(tree).map(child => find(child, type)).find(Boolean);
+  if (!tree || typeof tree !== "object") return undefined;
+  if (tree.type === type && !(type === "Feed" && tree.props?.testID === "home-category-pager")) return tree;
+  if (typeof tree.type === "function" && tree.type !== Header) {
+    return find(tree.type(tree.props), type);
+  }
+  if (tree.props?.testID === "home-category-pager" && typeof tree.props.renderItem === "function") {
+    const pages = Array.isArray(tree.props.data) ? tree.props.data : [];
+    for (let i = 0; i < pages.length; i += 1) {
+      if (!pages[i]?.mounted) continue;
+      const pageTree = tree.props.renderItem({ item: pages[i], index: i });
+      const foundInPage = find(pageTree, type);
+      if (foundInPage) return foundInPage;
+    }
+  }
+  return children(tree).map(child => find(child, type)).find(Boolean);
+}
+
+function findByTestId(tree, testID) {
+  if (!tree || typeof tree !== "object") return undefined;
+  if (tree.props?.testID === testID) return tree;
+  if (typeof tree.type === "function" && tree.type !== Header) {
+    return findByTestId(tree.type(tree.props), testID);
+  }
+  return children(tree).map(child => findByTestId(child, testID)).find(Boolean);
 }
 
 const Header = loadHeader();
@@ -129,10 +179,23 @@ function homeFixture(topInset, platform = "ios") {
     "@/contexts/NetworkContext": { useNetwork: () => ({ isOnline: mode.online, isChecking: false }) },
     "@/contexts/PlayerContext": { usePlayerRowActions: () => ({ playSong: noop }) },
     "@/lib/homeScrollRef": { globalHomeScrollRef: homeScrollRef },
-    "react-native": { Platform: { OS: platform }, View: "View", RefreshControl: "RefreshControl", StyleSheet: { create: value => value } },
-    "react-native-reanimated": { __esModule: true, default: { FlatList: "Feed", View: "AnimatedView" },
+    "react-native": {
+      AccessibilityInfo: { announceForAccessibility: noop },
+      FlatList: "FeedList",
+      Platform: { OS: platform },
+      View: "View",
+      RefreshControl: "RefreshControl",
+      StyleSheet: { create: value => value },
+      useWindowDimensions: () => ({ width: 390, height: 844 }),
+    },
+    "react-native-reanimated": { __esModule: true, default: { FlatList: "Feed", ScrollView: "AnimatedScrollView", View: "AnimatedView" },
       useAnimatedStyle: fn => fn(), useAnimatedScrollHandler: fn => fn,
-      useSharedValue: initial => react.useRef({ value: initial }).current, withTiming: value => value },
+      useSharedValue: initial => react.useRef({
+        value: initial,
+        get() { return this.value; },
+        set(next) { this.value = typeof next === "function" ? next(this.value) : next; },
+      }).current,
+      withTiming: value => value },
     "react-native-safe-area-context": { useSafeAreaInsets: () => ({ top: topInset, bottom: 0 }) },
     "@/data/providers/QuickPicksProvider": { getQuickPicksForCategory: () => [] },
     "@/lib/miniPlayerBannerConfig": {
@@ -143,12 +206,28 @@ function homeFixture(topInset, platform = "ios") {
     "../components/HomeAnnouncementBanner": { HomeAnnouncementBanner: "Notice" },
     "../hooks/useHomeAnnouncement": { useHomeAnnouncement: () => ({ visible: mode.visible, dismiss: () => { mode.visible = false; } }) },
     "../hooks/useFestivalTheme": { useFestivalTheme: () => undefined },
-    "../hooks/useHomeFeedData": { useHomeFeedData: () => ({ hasContent: mode.hasContent, quickPicksPool: [], featuredArtists: mode.cachedArtists,
+    "../hooks/useHomeFeedData": { useHomeFeedData: () => ({ hasContent: mode.hasContent, quickPicksPool: [], quickPickSongs: [], publicPlaylists: [], featuredArtists: mode.cachedArtists,
       handleRefresh: () => { mode.events.push("catalog"); return mode.refreshCatalog(); } }) },
     "../hooks/useYouTubeHomeFeed": { useYouTubeHomeFeed: () => ({ ...query, explore: { ...query, refetch: async () => { mode.events.push("explore"); } } }) },
     "../hooks/useAppShowcasePrompt": { useAppShowcasePrompt: noop },
-    "../hooks/useHomeSectionData": { useHomeSectionData: () => [] },
+    "../hooks/useHomeSectionData": { useHomeSectionData: () => [], buildHomeSectionItems: () => [] },
     "../hooks/buildHomeSections": { buildHomeSections: () => [] },
+    "../hooks/homePresentation": loadHomePresentation(),
+    "../constants/homeNavConstants": {
+      MAVRIXFY_MUSIC_CATEGORIES: [
+        { id: "All", label: "All" },
+        { id: "Spotify", label: "Featured" },
+        { id: "Songs", label: "Songs" },
+        { id: "Playlists", label: "Playlists" },
+        { id: "Albums", label: "Albums" },
+        { id: "New Releases", label: "New Releases" },
+        { id: "Trending", label: "Trending" },
+        { id: "Recently Played", label: "Recent" },
+      ],
+    },
+    "../utils/homeCategoryPagerUtils": loadHomeCategoryPagerUtils(),
+    "@/features/navigation/MainTabSwipeSurface": { MainTabSwipeSurface: "MainTabSwipeSurface" },
+    "@/features/navigation/navSwipeContext": { useOptionalNavSwipe: () => null },
     "@/components/AppShowcaseModal": {}, "@/services/youtube/YouTubeMusic": { clearYouTubeHomeCache: () => { mode.events.push("clear"); } },
   };
   // These children do not participate in header measurement in this fixture.
@@ -271,4 +350,40 @@ test("offline Home uses disk-cached profiles instead of hiding them behind the o
   const row = feed.props.renderItem({item:{id:'artists',type:'artists'}});
   assert.equal(row.type(row.props).props.artists,f.mode.storedArtists);
   assert.equal(f.mode.events.length,0);
+});
+
+test("Home category horizontal swipe settles categories safely and keeps adjacent feeds windowed", () => {
+  const pager = loadHomeCategoryPagerUtils();
+  const categories = [
+    { id: "All" },
+    { id: "Spotify" },
+    { id: "Songs" },
+    { id: "Playlists" },
+    { id: "Albums" },
+    { id: "New Releases" },
+    { id: "Trending" },
+    { id: "Recently Played" },
+  ];
+  assert.equal(pager.getHomeCategoryIndex(categories, "Albums"), 4);
+  assert.equal(pager.getHomeCategoryIndex(categories, "Unknown"), 0);
+  assert.equal(pager.getHomeCategoryId(categories, 7), "Recently Played");
+  assert.equal(pager.getHomeCategoryId(categories, 99), "Recently Played");
+  assert.equal(pager.getHomeCategoryId(categories, -5), "All");
+  assert.equal(pager.resolveHomeSettledPageIndex(780, 390, categories.length), 2);
+  assert.equal(pager.resolveHomeSettledPageIndex(-40, 390, categories.length), 0);
+  assert.equal(pager.isHomeCategoryPageMounted(0, 2), false);
+  assert.equal(pager.isHomeCategoryPageMounted(1, 2), true);
+  assert.equal(pager.isHomeCategoryPageMounted(2, 2), true);
+  assert.equal(pager.isHomeCategoryPageMounted(3, 2), true);
+  assert.equal(pager.isHomeCategoryPageMounted(4, 2), false);
+
+  const f = homeFixture(47);
+  let home = f.render();
+  const pagerList = findByTestId(home, "home-category-pager");
+  assert.ok(pagerList, "Home renders a horizontal category pager");
+  assert.equal(pagerList.props.horizontal, true);
+  assert.equal(pagerList.props.pagingEnabled, true);
+  pagerList.props.onMomentumScrollEnd({ nativeEvent: { contentOffset: { x: 390 * 2 } } });
+  home = f.render();
+  assert.equal(find(home, Header).props.selectedCategory, "Songs");
 });

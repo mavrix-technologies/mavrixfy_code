@@ -131,22 +131,28 @@ function normalizeHomePlaylists(items: NativePlaylist[]): YouTubeHomePlaylist[] 
 let exploreCache: { at: number; data: YouTubeHome } | undefined;
 let homeCache: { at: number; data: YouTubeHome } | undefined;
 let homeCacheGeneration = 0;
+/** Stable within a fetch. Surface another catalog window on explicit refresh. */
+export function rotateHomeItems<T>(items: T[], refresh: number): T[] {
+  if (items.length < 2) return items;
+  const offset = Math.max(0, Math.floor(refresh)) % items.length;
+  return [...items.slice(offset), ...items.slice(0, offset)];
+}
 const previewCache = new Map<string, { at: number; songs: Song[] }>();
 export function clearYouTubeHomeCache() { homeCacheGeneration++; homeCache = undefined; exploreCache = undefined; previewCache.clear(); }
 export async function loadYouTubeHome(signal?: AbortSignal, onFirstPage?: (feed: YouTubeHome) => void): Promise<YouTubeHome> {
   if (signal?.aborted) throw new Error("YouTube request cancelled");
   if (homeCache && Date.now() - homeCache.at < 1200000) { onFirstPage?.(homeCache.data); return homeCache.data; }
   const generation = homeCacheGeneration;
-  const data = await invoke((module, id) => module.home(id, onFirstPage ? page => { if (!signal?.aborted) onFirstPage(normalizeHome(page)); } : undefined), signal);
-  const result = normalizeHome(data);
+  const data = await invoke((module, id) => module.home(id, onFirstPage ? page => { if (!signal?.aborted && generation === homeCacheGeneration) onFirstPage(normalizeHome(page, generation)); } : undefined), signal);
+  const result = normalizeHome(data, generation);
   if (generation === homeCacheGeneration && !signal?.aborted && (result.songs.length || result.playlists.length)) homeCache = { at: Date.now(), data: result };
   return result;
 }
-function normalizeHome(data: { songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] }): YouTubeHome {
+function normalizeHome(data: { songs: NativeTrack[]; playlists: NativePlaylist[]; sections?: NativeHomeSection[] }, refresh = 0): YouTubeHome {
   return {
-    songs: normalizeTracks(data.songs), playlists: normalizeHomePlaylists(data.playlists).slice(0, 60),
+    songs: rotateHomeItems(normalizeTracks(data.songs), refresh), playlists: rotateHomeItems(normalizeHomePlaylists(data.playlists), refresh).slice(0, 60),
     sections: (data.sections || []).map(section => ({ ...section,
-      songs: normalizeTracks(section.songs).slice(0, 20), playlists: normalizeHomePlaylists(section.playlists).slice(0, 24),
+      songs: rotateHomeItems(normalizeTracks(section.songs), refresh).slice(0, 20), playlists: rotateHomeItems(normalizeHomePlaylists(section.playlists), refresh).slice(0, 24),
     })).filter(section => section.songs.length || section.playlists.length).slice(0, 12),
   };
 }
@@ -221,7 +227,13 @@ export function peekYouTubeStream(song: Song, quality?: string, includeExpired =
   // Error handling may identify an expired source; playback resolution never reuses it.
   return stream && (includeExpired || stream.expiresAt - Date.now() > 120000) && (!quality || stream.requestedQuality === quality) ? stream : undefined;
 }
-export async function resolveYouTubeStream(song: Song, quality?: string, preferJioSaavn = false): Promise<YouTubeStream> {
+export async function resolveYouTubeStream(
+  song: Song,
+  quality?: string,
+  preferJioSaavn = false,
+  signal?: AbortSignal
+): Promise<YouTubeStream> {
+  if (signal?.aborted) throw new Error("YouTube request cancelled");
   const requestedQuality = quality || "medium";
   const cached = peekYouTubeStream(song, requestedQuality);
   if (cached && Boolean(cached.preferJioSaavn) === preferJioSaavn) { latest.delete(song.id); return cached; }
@@ -233,15 +245,17 @@ export async function resolveYouTubeStream(song: Song, quality?: string, preferJ
     if (preferJioSaavn) {
       try {
         if (Date.now() - (rejectedAlternates.get(`${song.id}:JIOSAAVN`) || 0) < 60_000)
-          return invoke((module, id) => module.resolveStream(videoId, requestedQuality, id));
+          return invoke((module, id) => module.resolveStream(videoId, requestedQuality, id), signal);
         const { preferredJioSaavnStream } = await import("../audio/preferredJioSaavnStream");
-        const alternate = await preferredJioSaavnStream(song, videoId);
+        const alternate = await preferredJioSaavnStream(song, videoId, signal);
+        if (signal?.aborted) throw new Error("YouTube request cancelled");
         if (alternate) return alternate;
-      } catch {
+      } catch (err) {
+        if (signal?.aborted || (err instanceof Error && err.message === "YouTube request cancelled")) throw err;
         // Optional source availability must not prevent original playback.
       }
     }
-    return invoke((module, id) => module.resolveStream(videoId, requestedQuality, id));
+    return invoke((module, id) => module.resolveStream(videoId, requestedQuality, id), signal);
   })().then((stream) => {
     if (!stream.url.startsWith("https://") || stream.expiresAt <= Date.now()) throw new Error("Audio stream expired");
     if (pending.get(key) !== promise) throw new Error("Audio stream request superseded");

@@ -1,5 +1,6 @@
 import { StyleSheet,View } from "react-native";
 import { SimpleRow } from "./SettingsUIComponents";
+import { router } from "expo-router";
 
 export interface ProfileLibrarySectionProps {
   onDownloadedSongs: () => void;
@@ -15,6 +16,7 @@ export function ProfileLibrarySection({
   return (
     <>
       <View style={styles.sectionGroup}>
+        <SimpleRow icon="time-outline" title="Listening History" onPress={() => router.push("/listening-history" as any)} />
         <SimpleRow
           icon="arrow-down-circle-outline"
           title="Downloaded Songs"

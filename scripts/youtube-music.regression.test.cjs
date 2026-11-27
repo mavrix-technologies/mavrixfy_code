@@ -6,6 +6,23 @@ const ts = require("typescript");
 const { fixture: playerFixture, tick } = require("./helpers/audio-player-fixture.cjs");
 const track = { videoId: "abcdefghijk", title: "Same title", artist: "Same artist", coverUrl: "", duration: 180 };
 
+test("refresh rotates real home catalog windows without modifying IDs, duplicates or chart order", async () => {
+  const playlists = Array.from({ length: 30 }, (_, index) => ({ id: `PL${index}`, name: `Playlist ${index}`, coverUrl: "", songCount: 1 }));
+  let requests = 0;
+  const f = fixture({ home: async () => { requests++; return { songs: [], playlists, sections: [{ id: 'mixes', title: 'Mixes', songs: [], playlists }] }; } });
+  const first = await f.loadYouTubeHome();
+  const cached = await f.loadYouTubeHome();
+  assert.equal(requests, 1);
+  assert.equal(first, cached);
+  f.clearYouTubeHomeCache();
+  const refreshed = await f.loadYouTubeHome();
+  assert.equal(requests, 2);
+  assert.notEqual(first.sections[0].playlists[0].id, refreshed.sections[0].playlists[0].id);
+  assert.ok(refreshed.sections[0].playlists.some(item => !first.sections[0].playlists.some(old => old.id === item.id)));
+  assert.equal(new Set(refreshed.playlists.map(item => item.id)).size, 30);
+  assert.equal(playlists[0].id, 'PL0');
+});
+
 
 test("optional JioSaavn source uses the shared timeline/cache and OFF restores YouTube", async () => {
   let attempts = 0;

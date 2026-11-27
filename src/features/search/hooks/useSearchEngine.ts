@@ -1,48 +1,51 @@
-import { useFocusEffect,useRouter } from "expo-router";
-import { useCallback,useEffect,useMemo,useReducer,useRef,useState } from "react";
-import { Keyboard,Platform } from "react-native";
+import { useFocusEffect, useRouter } from "expo-router";
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Keyboard, Platform } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useAppTopHeaderScrollElevation } from "@/components/AppTopHeader";
-import { useNetwork,useOnReconnect } from "@/contexts/NetworkContext";
+import { useNetwork, useOnReconnect } from "@/contexts/NetworkContext";
 import { usePlayerRowActions } from "@/contexts/PlayerContext";
-import { getBestImageUrl,type Song } from "@/lib/musicData";
+import { getBestImageUrl, type Song } from "@/lib/musicData";
 import {
-type AlbumResult,
-type ArtistResult,
-fetchYouTubeSuggestions,
-type PlaylistResult,
-type ResultFilter,
-searchRepository,
+  type AlbumResult,
+  type ArtistResult,
+  fetchYouTubeSuggestions,
+  clearSearchRepositoryCache,
+  type PlaylistResult,
+  type ResultFilter,
+  searchRepository,
 
 } from "@/lib/searchRepository";
 import { clearYouTubeSearchCache } from "@/services/youtube/YouTubeMusic";
 import { normalizeText } from "@/lib/searchUtils";
 import {
-addSearchHistoryItem,
-addSongSearchHistoryItem,
-clearSearchHistory,
-getSearchHistory,
-removeSearchHistoryItem,
+  addSearchHistoryItem,
+  addSongSearchHistoryItem,
+  clearSearchHistory,
+  getSearchHistory,
+  getSettings,
+  removeSearchHistoryItem,
+  subscribeSettings,
 } from "@/lib/storage";
 import {
-getRouteSearchQuery,
-normalizeRecentSearchLabel,
-normalizeSearchSuggestionList,
-type RecentSearchItem,
-STITCH_BROWSE_CATEGORIES,
-toRecentSearchItems
+  getRouteSearchQuery,
+  normalizeRecentSearchLabel,
+  normalizeSearchSuggestionList,
+  type RecentSearchItem,
+  STITCH_BROWSE_CATEGORIES,
+  toRecentSearchItems
 } from "../types";
 
 import {
-createInitialSearchState,
-type SearchScreenAction,
-searchScreenReducer,
-type SearchScreenState,
+  createInitialSearchState,
+  type SearchScreenAction,
+  searchScreenReducer,
+  type SearchScreenState,
 } from "./searchEngineReducer";
 
 export {
-createInitialSearchState,searchScreenReducer,type SearchScreenAction,type SearchScreenState
+  createInitialSearchState, searchScreenReducer, type SearchScreenAction, type SearchScreenState
 };
 
 export type SearchSuggestionRow = { label: string; isHistory: boolean } & (
@@ -77,6 +80,33 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     suggestionsOpen,
   } = state;
   const [recentSearches, setRecentSearches] = useState<RecentSearchItem[]>([]);
+  const [preferredLanguages, setPreferredLanguages] = useState<string[] | undefined>(undefined);
+  const langSignature = preferredLanguages?.length ? preferredLanguages.join(",") : "default";
+
+  useEffect(() => {
+    let active = true;
+    if (typeof getSettings === "function") {
+      void getSettings()
+        .then((settings) => {
+          if (active && Array.isArray(settings?.preferredLanguages)) {
+            setPreferredLanguages(settings.preferredLanguages);
+          }
+        })
+        .catch(() => { });
+    }
+    const unsub =
+      typeof subscribeSettings === "function"
+        ? subscribeSettings((next) => {
+          if (active && Array.isArray(next?.preferredLanguages)) {
+            setPreferredLanguages(next.preferredLanguages);
+          }
+        })
+        : undefined;
+    return () => {
+      active = false;
+      unsub?.();
+    };
+  }, []);
 
   const {
     isHeaderElevated,
@@ -113,12 +143,21 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       const controller = new AbortController();
       activeSearchAbortRef.current = controller;
 
-      issuedKeyRef.current = `${resultFilter}:${normalizedQuery}`;
+      issuedKeyRef.current = `${resultFilter}:${langSignature}:${normalizedQuery}`;
       lastQueryRef.current = normalizedQuery;
       dispatch({ type: "SET_SEARCH_LOADING", loading: true });
 
       try {
-        const nextResults = await searchRepository(normalizedQuery, resultFilter, controller.signal);
+        const nextResults = await searchRepository(
+          normalizedQuery,
+          resultFilter,
+          controller.signal,
+          partial => {
+            if (requestId !== requestSeqRef.current || controller.signal.aborted) return;
+            dispatch({ type: "SEARCH_PARTIAL", results: partial, displayQuery: normalizedQuery });
+          },
+          preferredLanguages ? { preferredLanguages } : undefined
+        );
 
         if (requestId !== requestSeqRef.current || controller.signal.aborted) {
           return;
@@ -139,7 +178,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
         }
       }
     },
-    [resultFilter]
+    [resultFilter, langSignature, preferredLanguages]
   );
 
   const handleChangeText = useCallback((text: string) => {
@@ -175,6 +214,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       const trimmed = query.trim();
       if (trimmed.length > 0) {
         clearYouTubeSearchCache();
+        clearSearchRepositoryCache();
         void performSearch(trimmed);
       }
     }, [query, performSearch])
@@ -203,13 +243,17 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       const controller = new AbortController();
       suggestionsAbortRef.current = controller;
 
-      void fetchYouTubeSuggestions(trimmed, controller.signal)
+      void fetchYouTubeSuggestions(
+        trimmed,
+        controller.signal,
+        preferredLanguages ? { preferredLanguages } : undefined
+      )
         .then((rawSuggestions) => {
           if (controller.signal.aborted || suggestionsClosedForQueryRef.current === normalizeText(trimmed)) return;
           const cleanSuggestions = normalizeSearchSuggestionList(rawSuggestions);
           dispatch({ type: "SET_SUGGESTIONS", suggestions: cleanSuggestions });
         })
-        .catch(() => {});
+        .catch(() => { });
     }, 120);
 
     return () => {
@@ -218,7 +262,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       }
       suggestionsAbortRef.current?.abort();
     };
-  }, [query, isOnline]);
+  }, [query, isOnline, preferredLanguages]);
 
   const rememberRecentSearch = useCallback((label: string) => {
     const normalized = normalizeRecentSearchLabel(label);
@@ -403,7 +447,7 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
       return;
     }
 
-    if (`${resultFilter}:${trimmed}` === issuedKeyRef.current) return;
+    if (`${resultFilter}:${langSignature}:${trimmed}` === issuedKeyRef.current) return;
     issuedKeyRef.current = "";
     requestSeqRef.current++;
     activeSearchAbortRef.current?.abort();
@@ -415,13 +459,13 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     const searchTimer = setTimeout(() => {
       lastQueryRef.current = trimmed;
       void performSearch(trimmed);
-    }, lastQueryRef.current === trimmed ? 0 : 400);
+    }, lastQueryRef.current === trimmed ? 0 : 220);
     debounceTimer.current = searchTimer;
 
     return () => {
       clearTimeout(searchTimer);
     };
-  }, [performSearch, query, resultFilter, cancelActiveSearchWork]);
+  }, [performSearch, query, resultFilter, langSignature, cancelActiveSearchWork]);
 
   useEffect(() => {
     return cancelActiveSearchWork;
@@ -528,32 +572,50 @@ export function useSearchEngine(params: { q?: string | string[]; name?: string |
     const normalizedQuery = normalizeText(query);
     if (!normalizedQuery) return [];
     const rows: SearchSuggestionRow[] = [];
-    if (normalizedQuery.length >= 2 && normalizeText(searchDisplayQuery) === normalizedQuery && !searchLoading && !searchError) {
+    const seenEntities = new Set<string>();
+    const addEntity = (row: SearchSuggestionRow) => {
+      if (!row.label) return;
+      const labelKey = normalizeText(row.label);
+      if (!labelKey) return;
+      const entityKey = `${row.kind}:${labelKey}`;
+      if (seenEntities.has(entityKey)) return;
+      seenEntities.add(entityKey);
+      rows.push(row);
+    };
+
+    if (normalizedQuery.length >= 2 && normalizeText(searchDisplayQuery) === normalizedQuery && !searchError) {
       const candidates: SearchSuggestionRow[] = [
         ...songResults.map(song => ({ kind: "song" as const, label: song.title, song, isHistory: false })),
         ...artistResults.map(artist => ({ kind: "artist" as const, label: artist.name, artist, isHistory: false })),
         ...albumResults.map(album => ({ kind: "album" as const, label: album.name, album, isHistory: false })),
         ...playlistResults.map(playlist => ({ kind: "playlist" as const, label: playlist.name, playlist, isHistory: false })),
       ];
-      const best = candidates.find(item => item.label && normalizeText(item.label) === normalizedQuery) ??
+      const exactOrPrefix = candidates.find(item => item.label && normalizeText(item.label) === normalizedQuery) ??
         candidates.find(item => item.label && normalizeText(item.label).startsWith(`${normalizedQuery} `));
-      if (best) rows.push(best);
+      if (exactOrPrefix) addEntity(exactOrPrefix);
+
+      songResults.slice(0, 2).forEach(song => addEntity({ kind: "song", label: song.title, song, isHistory: false }));
+      artistResults.slice(0, 2).forEach(artist => addEntity({ kind: "artist", label: artist.name, artist, isHistory: false }));
+      albumResults.slice(0, 2).forEach(album => addEntity({ kind: "album", label: album.name, album, isHistory: false }));
+      playlistResults.slice(0, 2).forEach(playlist => addEntity({ kind: "playlist", label: playlist.name, playlist, isHistory: false }));
     }
-    const seen = new Set(rows.map(item => normalizeText(item.label)));
+
+    const seenQueries = new Set(rows.map(item => normalizeText(item.label)));
     const addQuery = (label: string, isHistory: boolean) => {
       const key = normalizeText(label);
-      if (!key || seen.has(key)) return;
-      seen.add(key);
+      if (!key || seenQueries.has(key)) return;
+      seenQueries.add(key);
       rows.push({ kind: "query", label, isHistory });
     };
     recentSearches.filter(item => item.type === "query" && normalizeText(item.label).startsWith(normalizedQuery))
-      .slice(0, 3).forEach(item => addQuery(item.label, true));
+      .slice(0, 2).forEach(item => addQuery(item.label, true));
     suggestions.forEach(label => addQuery(label, false));
-    return rows.slice(0, 8);
-  }, [query, searchDisplayQuery, searchLoading, searchError, songResults, artistResults, albumResults, playlistResults, recentSearches, suggestions]);
+    return rows.slice(0, 12);
+  }, [query, searchDisplayQuery, searchError, songResults, artistResults, albumResults, playlistResults, recentSearches, suggestions]);
 
   return {
     isOnline,
+    preferredLanguages,
     topInset,
     query,
     isSearchMode,

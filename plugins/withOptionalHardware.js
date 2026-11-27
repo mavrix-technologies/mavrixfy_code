@@ -1,7 +1,7 @@
 const { withAndroidManifest } = require("@expo/config-plugins");
 
-// Music playback works without these peripherals. Keep Play's permission-based
-// hardware filters from excluding devices that supported earlier releases.
+// Music playback works without these features. Explicit declarations override
+// the hardware requirements Play infers from permissions and orientation.
 const OPTIONAL_FEATURES = [
   "android.hardware.bluetooth",
   "android.hardware.microphone",
@@ -9,6 +9,7 @@ const OPTIONAL_FEATURES = [
   "android.hardware.camera.autofocus",
   "android.hardware.location",
   "android.hardware.location.gps",
+  "android.hardware.screen.portrait",
   "android.hardware.touchscreen",
   "android.hardware.wifi",
 ];

@@ -690,3 +690,22 @@ test("search surfaces a selected-category failure while preserving other success
   assert.equal(result.songs.length, 0); assert.equal(result.albums.length, 0);
 });
 
+test("audio selection skips DRC, dubbed tracks, and HE-AAC when clean AAC-LC or Opus is available", async () => {
+  const formats = [
+    { itag: 251, has_audio: true, has_video: false, mime_type: 'audio/webm; codecs="opus"', bitrate: 165000, is_drc: true,
+      url: "https://rr1.googlevideo.com/videoplayback?expire=2000&variant=drc" },
+    { itag: 251, has_audio: true, has_video: false, mime_type: 'audio/webm; codecs="opus"', bitrate: 160000, is_drc: false, is_original: true,
+      audio_track: { audio_is_default: true, id: "orig" },
+      url: "https://rr1.googlevideo.com/videoplayback?expire=2000&variant=clean-opus" },
+    { itag: 140, has_audio: true, has_video: false, mime_type: 'audio/mp4; codecs="mp4a.40.2"', bitrate: 128000, is_auto_dubbed: true,
+      audio_track: { audio_is_default: false, id: "dub" },
+      url: "https://rr1.googlevideo.com/videoplayback?expire=2000&variant=dubbed" },
+    { itag: 141, has_audio: true, has_video: false, mime_type: 'audio/mp4; codecs="mp4a.40.5"', bitrate: 256000,
+      url: "https://rr1.googlevideo.com/videoplayback?expire=2000&variant=heaac" },
+  ];
+  const f = fixture({ info: async () => ({ playability_status: { status: "OK" }, streaming_data: { adaptive_formats: formats } }), contentType: "audio/webm" });
+  const stream = await f.api.resolveStream("abcdefghijk", "high", "clean-audio");
+  assert.match(stream.url, /variant=clean-opus/);
+  assert.equal(stream.codec, "opus");
+});
+

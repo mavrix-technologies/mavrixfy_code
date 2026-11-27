@@ -1,6 +1,19 @@
 const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
 const lerp = (a, b, t) => a + (b - a) * t;
 
+function bindPassiveScrollFrame(renderFrame) {
+  let frameId = 0;
+  const onScroll = () => {
+    if (frameId) return;
+    frameId = requestAnimationFrame(() => {
+      renderFrame();
+      frameId = 0;
+    });
+  };
+  renderFrame();
+  window.addEventListener("scroll", onScroll, { passive: true });
+}
+
 function progressBetween(el, start = 0, end = 1) {
   const rect = el.getBoundingClientRect();
   const h = el.offsetHeight - window.innerHeight;
@@ -42,16 +55,19 @@ function setupHero() {
   }
   video?.play?.().catch(() => {});
 
+  const heroContainer = stage.querySelector(".hero-container");
+
   const tick = () => {
     const p = clamp(-stage.getBoundingClientRect().top / window.innerHeight, 0, 1);
     bg.forEach((node) => {
       node.style.filter = `blur(${p * 8}px)`;
       node.style.transform = `scale(${1 + p * 0.08})`;
     });
-    stage.querySelector(".hero-container").style.transform = `translateY(${p * -8}%)`;
+    if (heroContainer) {
+      heroContainer.style.transform = `translateY(${p * -8}%)`;
+    }
   };
-  tick();
-  window.addEventListener("scroll", tick, { passive: true });
+  bindPassiveScrollFrame(tick);
 }
 
 function setupDeck() {
@@ -83,8 +99,7 @@ function setupDeck() {
       el.style.opacity = p > 0.16 ? "1" : "0";
     });
   };
-  tick();
-  window.addEventListener("scroll", tick, { passive: true });
+  bindPassiveScrollFrame(tick);
 }
 
 function setupDoor() {
@@ -136,8 +151,7 @@ function setupDoor() {
       zoom.style.opacity = String(cover > 0.02 ? 1 : 0);
     }
   };
-  tick();
-  window.addEventListener("scroll", tick, { passive: true });
+  bindPassiveScrollFrame(tick);
 }
 
 function setupReveals() {
@@ -201,17 +215,13 @@ function setupQuotes() {
 
 function setupNav() {
   const nav = document.querySelector("nav");
+  if (!nav) return;
   let last = 0;
-  window.addEventListener(
-    "scroll",
-    () => {
-      const y = window.scrollY;
-      if (!nav) return;
-      nav.style.transform = y > last && y > 80 ? "translateY(-120%)" : "translateY(0)";
-      last = y;
-    },
-    { passive: true }
-  );
+  bindPassiveScrollFrame(() => {
+    const y = window.scrollY;
+    nav.style.transform = y > last && y > 80 ? "translateY(-120%)" : "translateY(0)";
+    last = y;
+  });
 }
 
 document.addEventListener("DOMContentLoaded", () => {

@@ -7,7 +7,8 @@ import { Event, type NativeTrack } from "./playbackContract";
 import type { Song } from "@/lib/musicData";
 export { Event, RepeatMode, State } from "./playbackContract";
 
-type Snapshot = { queue: NativeTrack[]; index: number; state: string; position: number; duration: number; buffered?: number; playWhenReady: boolean; equalizerAvailable: boolean;
+export type AudioDiagnostics = { codec?: string; bitrate?: number; sampleRate?: number; channelCount?: number; outputSampleRate?: number; outputChannels?: number; equalizerActive?: boolean; compressionActive?: boolean; originalSoundEnabled?: boolean; volume?: number; trackId?: string };
+type Snapshot = { queue: NativeTrack[]; index: number; state: string; position: number; duration: number; buffered?: number; playWhenReady: boolean; equalizerAvailable: boolean; audioDiagnostics?: AudioDiagnostics;
   sourceRequest?: { requestId: number; index: number; trackId: string; position: number } | null; supportsSourceRequests?: boolean };
 type Bridge = {
   setup(): Promise<Snapshot>;
@@ -45,7 +46,7 @@ async function ready(): Promise<Bridge> {
         }).catch(() => {});
       }
       listeners.get(name)?.forEach(listener => listener(data));
-      if (name === Event.PlaybackActiveTrackChanged || name === Event.PlaybackState && data.state === "playing") void warmQueue().catch(() => {});
+      if (name === Event.PlaybackState && data.state === "playing") void warmQueue().catch(() => {});
     });
     setup = bridge.setup().then(snapshot => {
       lastEffects = { equalizerAvailable: snapshot.equalizerAvailable };
@@ -185,8 +186,23 @@ export function getNativeCarClient() {
   };
 }
 export function getNativeAudioEffects() { return lastEffects; }
-export function setNativeEqualizer(gains: readonly number[], enabled: boolean) {
+export function setNativeEqualizer(gains: readonly number[], enabled: boolean, normalizeVolume?: boolean, originalSoundEnabled?: boolean) {
   if (gains.length !== EQ_FREQUENCIES_HZ.length) throw new Error("Invalid EQ bands.");
-  void command("equalizer", { gains: gains.map(value => Number.isFinite(value) ? Math.max(-8, Math.min(8, value)) : 0), enabled })
+  const args: Record<string, unknown> = {
+    gains: gains.map(value => Number.isFinite(value) ? Math.max(-8, Math.min(8, value)) : 0),
+    enabled,
+  };
+  if (typeof normalizeVolume === "boolean") args.normalizeVolume = normalizeVolume;
+  if (typeof originalSoundEnabled === "boolean") args.originalSoundEnabled = originalSoundEnabled;
+  void command("equalizer", args)
     .catch(error => logger.warn("[Audio] Native EQ failed", error));
+}
+export function setNativeNormalizeVolume(enabled: boolean) {
+  if (Platform.OS !== "android" || !bridge) return;
+  void command("normalizeVolume", { enabled: Boolean(enabled) })
+    .catch(error => logger.warn("[Audio] Volume normalization failed", error));
+}
+export async function setNativeOriginalSound(enabled: boolean) {
+  if (!bridge) return;
+  await command("originalSound", { enabled });
 }

@@ -20,6 +20,7 @@ export type SearchScreenAction =
   | { type: "SET_QUERY"; query: string }
   | { type: "SET_SEARCH_LOADING"; loading: boolean }
   | { type: "SEARCH_SUCCESS"; results: SearchResults; displayQuery: string }
+  | { type: "SEARCH_PARTIAL"; results: SearchResults; displayQuery: string }
   | { type: "SEARCH_RESET"; displayQuery: string }
   | { type: "SEARCH_FAILED"; displayQuery: string }
   | { type: "SET_SUGGESTIONS"; suggestions: string[] }
@@ -62,12 +63,13 @@ export function searchScreenReducer(
         searchLoading: action.loading,
         searchError: false,
       };
+    case "SEARCH_PARTIAL":
     case "SEARCH_SUCCESS":
       return {
         ...state,
         results: action.results,
         searchDisplayQuery: action.displayQuery,
-        searchLoading: false,
+        searchLoading: action.type === "SEARCH_PARTIAL",
         searchError: false,
       };
     case "SEARCH_RESET":

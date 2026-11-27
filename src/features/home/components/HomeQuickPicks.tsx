@@ -189,6 +189,9 @@ export const HomeQuickPicks = memo(function HomeQuickPicks({
         keyExtractor={keyExtractor}
         renderItem={renderColumn}
         horizontal
+        nestedScrollEnabled
+        directionalLockEnabled
+        overScrollMode="never"
         showsHorizontalScrollIndicator={false}
         snapToInterval={columnWidth + 14}
         decelerationRate="fast"

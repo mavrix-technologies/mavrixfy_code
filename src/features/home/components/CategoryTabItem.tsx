@@ -12,6 +12,8 @@ import { UNIFIED_HEADER_TOP_BAR_HEIGHT, UNIFIED_HEADER_MENU_HEIGHT } from "../co
 export interface CategoryTabItemProps {
   item: MusicCategoryItem;
   active: boolean;
+  index?: number;
+  categoryProgress?: number | SharedValue<number>;
   isIOS: boolean;
   isFestival: boolean;
   scrollY?: number | SharedValue<number>;
@@ -25,6 +27,8 @@ export interface CategoryTabItemProps {
 export const CategoryTabItem = React.memo(function CategoryTabItem({
   item,
   active,
+  index = 0,
+  categoryProgress,
   isIOS,
   isFestival,
   scrollY,
@@ -37,6 +41,18 @@ export const CategoryTabItem = React.memo(function CategoryTabItem({
   const handlePress = useCallback(() => {
     onPress(item);
   }, [item, onPress]);
+
+  const indicatorAnimatedStyle = useAnimatedStyle(() => {
+    "worklet";
+    if (categoryProgress === undefined) {
+      return { opacity: active ? 1 : 0 };
+    }
+    const progress = typeof categoryProgress === "number" ? categoryProgress : categoryProgress.value;
+    const distance = Math.abs(progress - index);
+    return {
+      opacity: Math.max(0, 1 - distance),
+    };
+  }, [active, categoryProgress, index]);
 
   // UI-thread opacity for festive active colors: 1 at rest (scrollY = 0), fades to 0 when scrolled to sticky dock
   const festiveAnimatedStyle = useAnimatedStyle(() => {
@@ -67,6 +83,7 @@ export const CategoryTabItem = React.memo(function CategoryTabItem({
       accessibilityRole="tab"
       accessibilityState={{ selected: active }}
       accessibilityLabel={`Category ${item.label}`}
+      accessibilityHint="Double tap or swipe feed horizontally to view this category"
       hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
       onPress={handlePress}
       style={({ pressed }) => [
@@ -97,12 +114,13 @@ export const CategoryTabItem = React.memo(function CategoryTabItem({
           >
             {item.label}
           </Text>
-          {active && (
+          {(active || categoryProgress !== undefined) && (
             <View style={styles.activeIndicatorWrap} pointerEvents="none">
-              <View
+              <Animated.View
                 style={[
                   styles.activeIndicator,
                   { backgroundColor: festiveIndicatorColor },
+                  indicatorAnimatedStyle,
                 ]}
               />
             </View>
@@ -138,12 +156,13 @@ export const CategoryTabItem = React.memo(function CategoryTabItem({
         >
           {item.label}
         </Text>
-        {active && (
+        {(active || categoryProgress !== undefined) && (
           <View style={styles.activeIndicatorWrap} pointerEvents="none">
-            <View
+            <Animated.View
               style={[
                 styles.activeIndicator,
                 { backgroundColor: "#FFFFFF" },
+                indicatorAnimatedStyle,
               ]}
             />
           </View>

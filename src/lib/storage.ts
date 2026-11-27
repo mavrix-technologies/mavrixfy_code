@@ -79,7 +79,36 @@ export interface AppSettings {
   crossfade: number;
   gapless: boolean;
   normalizeVolume: boolean;
+  originalSoundEnabled?: boolean;
   ambientBackdropEnabled: boolean;
+  preferredLanguages: string[];
+}
+
+const VALID_PREFERRED_LANGUAGES = new Set([
+  "hindi",
+  "punjabi",
+  "english",
+  "tamil",
+  "telugu",
+  "marathi",
+  "bengali",
+  "malayalam",
+  "kannada",
+  "gujarati",
+  "bhojpuri",
+]);
+function normalizePreferredLanguageList(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return ["hindi", "punjabi"];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const lower = String(item || "").trim().toLowerCase();
+    const mapped = lower === "international" ? "english" : lower;
+    if (!VALID_PREFERRED_LANGUAGES.has(mapped) || seen.has(mapped)) continue;
+    seen.add(mapped);
+    out.push(mapped);
+  }
+  return out.length > 0 ? out : ["hindi", "punjabi"];
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -99,7 +128,9 @@ const DEFAULT_SETTINGS: AppSettings = {
   crossfade: 0,
   gapless: true,
   normalizeVolume: false,
+  originalSoundEnabled: false,
   ambientBackdropEnabled: false,
+  preferredLanguages: ["hindi", "punjabi"],
 };
 
 const SEARCH_HISTORY_LIMIT = 12;
@@ -448,7 +479,9 @@ export async function getSettings(): Promise<AppSettings> {
     crossfade: typeof saved.crossfade === "number" ? Math.max(0, Math.min(12, saved.crossfade)) : DEFAULT_SETTINGS.crossfade,
     gapless: saved.gapless !== undefined ? Boolean(saved.gapless) : DEFAULT_SETTINGS.gapless,
     normalizeVolume: saved.normalizeVolume !== undefined ? Boolean(saved.normalizeVolume) : DEFAULT_SETTINGS.normalizeVolume,
+    originalSoundEnabled: Boolean(saved.originalSoundEnabled),
     ambientBackdropEnabled: saved.ambientBackdropEnabled !== undefined ? Boolean(saved.ambientBackdropEnabled) : DEFAULT_SETTINGS.ambientBackdropEnabled,
+    preferredLanguages: normalizePreferredLanguageList(saved.preferredLanguages),
 
   };
 }

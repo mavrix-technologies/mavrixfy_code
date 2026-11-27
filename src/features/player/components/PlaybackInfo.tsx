@@ -1,6 +1,7 @@
 import { playbackStatusLabel } from "@/services/audio/playbackStatusLabel";
-import { memo } from "react";
-import { StyleSheet, Text, View } from "react-native";
+import { memo, useState } from "react";
+import { Pressable, StyleSheet, Text } from "react-native";
+import { AudioDiagnosticsPanel } from "./AudioDiagnosticsPanel";
 import { usePlayerActions } from "@/contexts/PlayerContextDefs";
 import { usePlaybackEngineSelector } from "@/services/audio/PlaybackEngine";
 import { getSongProvider } from "@/lib/providerFilter";
@@ -9,6 +10,7 @@ import { useAuth } from "@/contexts/AuthContext";
 const qualityNames = { auto: "Auto", low: "Low", medium: "Medium", high: "High" };
 
 export const PlaybackInfo = memo(function PlaybackInfo({ color = "rgba(255,255,255,0.65)" }: { color?: string }) {
+  const [showDetails, setShowDetails] = useState(false);
   const { user } = useAuth();
   const isAdmin = user?.isAdmin === true;
   const { playbackQuality } = usePlayerActions();
@@ -36,11 +38,14 @@ export const PlaybackInfo = memo(function PlaybackInfo({ color = "rgba(255,255,2
   const label = isAdmin ? (status ? `${sourceName} · ${status}` : quality) : (status || "Mavrixfy Music");
 
   return (
-    <View style={styles.info} accessible accessibilityLabel={isAdmin ? [status, quality].filter(Boolean).join(". ") : label}>
+    <>
+    <Pressable style={styles.info} onPress={() => setShowDetails(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={`${isAdmin ? [status, quality].filter(Boolean).join(". ") : label}. Open audio details`}>
       <Text numberOfLines={1} style={[styles.label, { color }]} accessibilityLiveRegion="polite">
         {label}
       </Text>
-    </View>
+    </Pressable>
+    {showDetails && <AudioDiagnosticsPanel key={currentSong?.id || "none"} visible onClose={() => setShowDetails(false)} song={currentSong} quality={{ ...playbackQuality, actualBitrate: bitrate, codec }} />}
+    </>
   );
 });
 

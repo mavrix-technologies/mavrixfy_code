@@ -140,7 +140,13 @@ export const styles = StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_400Regular",
   },
-  recentActionBtn: { padding: 8 },
+  recentActionBtn: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+  },
   recentEmpty: {
     minHeight: 170,
     alignItems: "center",
@@ -351,6 +357,34 @@ export const styles = StyleSheet.create({
     fontSize: 12.5,
     fontFamily: "Inter_500Medium",
   },
+  resultRowMenuBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: -8,
+  },
+  retryButton: {
+    marginTop: 6,
+    minHeight: 48,
+    minWidth: 140,
+    paddingHorizontal: 22,
+    borderRadius: 24,
+    backgroundColor: "rgba(38, 225, 154, 0.16)",
+    borderWidth: 1,
+    borderColor: "rgba(38, 225, 154, 0.35)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  retryButtonPressed: {
+    opacity: 0.75,
+  },
+  retryButtonText: {
+    color: "#26e19a",
+    fontSize: 14,
+    fontFamily: "Inter_700Bold",
+  },
 
   // ── Playlist grid ────────────────────────────────────────────────────────────
   playlistGridContentContainer: {
@@ -447,11 +481,11 @@ export const styles = StyleSheet.create({
 
   // ── Search suggestions ─────────────────────────────────────────────────────
   suggestionRow: {
-    minHeight: 56,
+    minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
-    paddingHorizontal: 20,
-    paddingVertical: 13,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "rgba(255,255,255,0.06)",
   },
@@ -461,12 +495,39 @@ export const styles = StyleSheet.create({
   },
   suggestionIcon: {
     marginRight: 14,
-    opacity: 0.6,
+    opacity: 0.65,
+  },
+  suggestionThumbWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 6,
+    marginRight: 12,
+    overflow: "hidden",
+    backgroundColor: Colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  suggestionThumbRound: {
+    borderRadius: 21,
+  },
+  suggestionThumbImage: {
+    width: "100%",
+    height: "100%",
+  },
+  suggestionContent: {
+    flex: 1,
+    minWidth: 0,
+    justifyContent: "center",
+    gap: 2,
   },
   suggestionText: {
-    flex: 1,
     color: Colors.text,
     fontSize: 15,
+    fontFamily: "Inter_500Medium",
+  },
+  suggestionSubtext: {
+    color: Colors.subtext,
+    fontSize: 12.5,
     fontFamily: "Inter_400Regular",
   },
 });

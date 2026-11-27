@@ -13,9 +13,15 @@ function providerFixture(overrides = {}) {
   const code = ts.transpileModule(fs.readFileSync("src/data/providers/ArtistProvider.ts", "utf8"), {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
   }).outputText;
+  const musicLanguagesCode = ts.transpileModule(fs.readFileSync("src/lib/musicLanguages.ts", "utf8"), {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const musicLanguagesModule = { exports: {} };
+  vm.runInNewContext(musicLanguagesCode, { module: musicLanguagesModule, exports: musicLanguagesModule.exports });
   vm.runInNewContext(code, { module, exports: module.exports, Date: { now: () => now }, require: name => {
     if (name === "@/services/youtube/YouTubeMusic") return api;
     if (name === "@/services/youtube/YouTubeArtists") return require("./helpers/youtube-artists-fixture.cjs");
+    if (name === "@/lib/musicLanguages") return musicLanguagesModule.exports;
     if (name === "@react-native-async-storage/async-storage") return { getItem: async key => storage.get(key),
       setItem: async (key, data) => storage.set(key, data), removeItem: async key => storage.delete(key) };
     throw new Error(name);

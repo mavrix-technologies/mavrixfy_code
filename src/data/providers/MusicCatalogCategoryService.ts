@@ -1,4 +1,9 @@
 import { sortedCopy } from "@/lib/arrayUtils";
+import {
+  buildAcceptLanguageHeader,
+  INDIA_COUNTRY_CODE,
+  normalizeMusicLanguages,
+} from "@/lib/musicLanguages";
 import { fetchWithTimeout } from "@/utils/asyncUtils";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import {
@@ -56,7 +61,10 @@ export function getCategoryTtlMs(categoryId: string): number {
   return CATEGORY_TTL_MS[categoryId] ?? CATALOG_CATEGORY_CACHE_TTL_MS;
 }
 
-export function getCurrentRefreshContext(now: Date = new Date()): AutoRefreshContext {
+export function getCurrentRefreshContext(
+  now: Date = new Date(),
+  preferredLanguages?: readonly string[]
+): AutoRefreshContext {
   const hour = now.getHours();
   let slot: AutoRefreshTimeSlot = "night";
 
@@ -66,14 +74,19 @@ export function getCurrentRefreshContext(now: Date = new Date()): AutoRefreshCon
 
   const day = now.getDay();
   const isWeekend = day === 0 || day === 6;
-  const languageBias: AutoRefreshContext["languageBias"] = "hindi";
-  const cacheFingerprint = `v5|${slot}|${isWeekend ? "weekend" : "weekday"}|${languageBias}`;
+  const normalizedLangs = normalizeMusicLanguages(preferredLanguages);
+  const primaryLang = normalizedLangs[0];
+  const languageBias: AutoRefreshContext["languageBias"] =
+    primaryLang === "punjabi" ? "punjabi" : primaryLang === "english" ? "english" : "hindi";
+  const langKey = normalizedLangs.join(",");
+  const cacheFingerprint = `v6|${INDIA_COUNTRY_CODE}|${slot}|${isWeekend ? "weekend" : "weekday"}|${langKey}`;
 
   return {
     timestamp: now.getTime(),
     slot,
     isWeekend,
     languageBias,
+    preferredLanguages: normalizedLangs,
     cacheFingerprint,
   };
 }
@@ -108,15 +121,18 @@ export async function searchPlaylistsRaw(
     const trimmed = endpointBase.replace(/\/+$/, "");
     return (
       `${trimmed}/search/playlists?` +
-      `query=${encodeURIComponent(enhancedQuery)}&limit=${requestLimit}&page=1` +
+      `query=${encodeURIComponent(enhancedQuery)}&limit=${requestLimit}&page=1&country=${INDIA_COUNTRY_CODE}` +
       (forceRefresh ? `&refresh=1&ts=${Date.now()}` : "")
     );
   });
 
+  const acceptLanguage = buildAcceptLanguageHeader();
   const providerResults = await Promise.all(
     requestUrls.map(async (requestUrl) => {
       try {
-        const response = await fetchWithTimeout(requestUrl, { headers: { Accept: "application/json" } });
+        const response = await fetchWithTimeout(requestUrl, {
+          headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
+        });
 
         if (!response.ok) {
           await consumeResponseBody(response);
@@ -146,14 +162,18 @@ export async function searchCatalogAlbums(
     const trimmed = endpointBase.replace(/\/+$/, "");
     return (
       `${trimmed}/search/albums?` +
-      `query=${encodeURIComponent(searchQuery)}&limit=${Math.max(1, limit)}&page=1`
+      `query=${encodeURIComponent(searchQuery)}&limit=${Math.max(1, limit)}&page=1&country=${INDIA_COUNTRY_CODE}`
     );
   });
 
+  const acceptLanguage = buildAcceptLanguageHeader();
   const providerResults = await Promise.all(
     requestUrls.map(async (requestUrl) => {
       try {
-        const response = await fetchWithTimeout(requestUrl, { headers: { Accept: "application/json" }, signal });
+        const response = await fetchWithTimeout(requestUrl, {
+          headers: { Accept: "application/json", "Accept-Language": acceptLanguage },
+          signal,
+        });
 
         if (!response.ok) {
           await consumeResponseBody(response);
@@ -298,7 +318,14 @@ export function buildContextBoostTerms(category: CatalogCategory, context: AutoR
     }
   }
 
-  const combined = [...category.searchTerms, ...boostedTerms];
+  if (context.preferredLanguages?.length) {
+    const preferredTerms = context.preferredLanguages
+      .slice(0, 3)
+      .map((lang) => (category.id === "new-arrivals" ? `new ${lang} songs` : `${lang} ${category.id === "trending" ? "trending" : "hits"}`));
+    boostedTerms.unshift(...preferredTerms);
+  }
+
+  const combined = [...boostedTerms, ...category.searchTerms];
   const seen = new Set<string>();
   return combined.filter((term) => {
     const key = term.toLowerCase();

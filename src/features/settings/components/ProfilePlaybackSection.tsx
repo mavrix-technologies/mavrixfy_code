@@ -15,6 +15,7 @@ SMART_AUTOPLAY_OPTIONS,
 VIDEO_QUALITY_OPTIONS,
 } from "../constants/settingsConstants";
 import { SegmentPicker } from "./SettingsUIComponents";
+import { MusicLanguagePicker } from "@/components/MusicLanguagePicker";
 
 interface ProfilePlaybackSectionProps {
   section: "streaming-downloads" | "playback" | "controls";
@@ -163,6 +164,15 @@ export function ProfilePlaybackSection({
 
       {section === "playback" && (
         <View style={styles.sectionGroup}>
+        <View style={styles.row}>
+          <Ionicons name="musical-note-outline" size={22} color="rgba(255,255,255,0.7)" style={styles.rowIcon} />
+          <View style={styles.rowTextCol}>
+            <Text style={styles.rowTitle}>Original sound</Text>
+            <Text style={styles.rowSubtitle}>Bypass Mavrixfy EQ and compression. Saved presets are preserved.</Text>
+          </View>
+          <Switch value={Boolean(settings.originalSoundEnabled)} onValueChange={value => { void updateSettings({ originalSoundEnabled: value }); }}
+            accessibilityLabel="Original sound" trackColor={{ false: "rgba(255,255,255,0.1)", true: Colors.primary }} thumbColor="#FFFFFF" />
+        </View>
         {/* Video Background */}
         <View style={styles.groupBlock}>
           <View style={styles.blockHeader}>
@@ -211,6 +221,14 @@ export function ProfilePlaybackSection({
               />
             </View>
           )}
+        </View>
+
+        {/* Music Languages */}
+        <View style={[styles.groupBlock, styles.blockDivider]}>
+          <MusicLanguagePicker
+            selected={settings.preferredLanguages}
+            onChange={(preferredLanguages) => void updateSettings({ preferredLanguages })}
+          />
         </View>
 
         </View>

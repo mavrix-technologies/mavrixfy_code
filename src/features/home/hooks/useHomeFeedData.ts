@@ -19,7 +19,7 @@ import {
 } from "@/lib/homeCache";
 import { logger } from "@/lib/logger";
 import type { Song } from "@/lib/musicData";
-import { getRecentlyPlayed, type RecentlyPlayedItem } from "@/lib/storage";
+import { getRecentlyPlayed, getSettings, subscribeSettings, type RecentlyPlayedItem } from "@/lib/storage";
 import { useFocusEffect } from "expo-router";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { DeviceEventEmitter } from "react-native";
@@ -72,7 +72,33 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
   }));
 
   const [recentlyPlayed, setRecentlyPlayed] = useState<RecentlyPlayedItem[]>([]);
+  const [preferredLanguages, setPreferredLanguages] = useState<string[] | undefined>(undefined);
   const [refreshing, setRefreshing] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    if (typeof getSettings === "function") {
+      void getSettings()
+        .then((s) => {
+          if (active && Array.isArray(s?.preferredLanguages)) {
+            setPreferredLanguages(s.preferredLanguages);
+          }
+        })
+        .catch(() => {});
+    }
+    const unsub =
+      typeof subscribeSettings === "function"
+        ? subscribeSettings((next) => {
+            if (active && Array.isArray(next?.preferredLanguages)) {
+              setPreferredLanguages(next.preferredLanguages);
+            }
+          })
+        : undefined;
+    return () => {
+      active = false;
+      unsub?.();
+    };
+  }, []);
 
   const loadRecentlyPlayed = useCallback(async () => {
     try {
@@ -146,7 +172,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
           .catch(async (error) => {
             logger.warn("[Home] Official feed unavailable, using search fallback:", error);
             try {
-              const fallbackCats = await getHomeCatalogCategories({ forceRefresh });
+              const fallbackCats = await getHomeCatalogCategories({ forceRefresh, preferredLanguages });
               return fallbackCats.length > 0 ? { categories: fallbackCats, songs: [] } : null;
             } catch (err) {
               logger.warn("[Home] Fallback categories failed:", err);
@@ -175,12 +201,14 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
           })
           .catch(() => [] as FirestorePlaylist[]);
 
-        const artistsTask = compact ? Promise.resolve([] as ArtistCard[]) : getFeaturedArtists().catch(() => [] as ArtistCard[]);
+        const artistsTask = compact
+          ? Promise.resolve([] as ArtistCard[])
+          : getFeaturedArtists({ preferredLanguages }).catch(() => [] as ArtistCard[]);
 
         const [, spotifyCategories, quickPicksFeed, playlists, artists] =
           await Promise.all([
             officialTask,
-            getAllSpotifyCategories(forceRefresh),
+            getAllSpotifyCategories(forceRefresh, preferredLanguages),
             quickPicksTask,
             playlistsTask,
             artistsTask,
@@ -247,7 +275,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
         if (mountedRef.current) setFeedState(previous => previous.loading ? { ...previous, loading: false } : previous);
       }
     },
-    [compact, isOnline]
+    [compact, isOnline, preferredLanguages]
   );
 
   useEffect(() => {
@@ -309,6 +337,7 @@ export function useHomeFeedData({ compact = false }: { compact?: boolean } = {})
     featuredArtists: feedState.featuredArtists,
     quickPickSongs: feedState.quickPickSongs,
     quickPicksPool: feedState.quickPicksPool,
+    preferredLanguages,
     recentlyPlayed,
     loading: feedState.loading,
     loadingMainContent: feedState.loading,

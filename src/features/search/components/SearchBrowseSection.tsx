@@ -31,6 +31,9 @@ export function BrowseCategoryCard({
 
   return (
     <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={`Browse ${category.title}`}
+      accessibilityHint={`Search ${category.title} music`}
       style={({ pressed }) => [
         styles.browseCard,
         { backgroundColor: category.color },
@@ -120,6 +123,9 @@ export const SearchRecentSection = React.memo(function SearchRecentSection({
     ({ item }: { item: RecentSearchItem }) => (
       <Pressable
         key={item.id}
+        accessibilityRole="button"
+        accessibilityLabel={item.subtitle ? `${item.label}, ${item.subtitle}` : item.label}
+        accessibilityHint={item.type === "song" ? "Double tap to play song" : "Double tap to search again"}
         style={({ pressed }) => [styles.recentRow, pressed && styles.recentRowPressed]}
         onPress={() => onRecentSearchPress(item)}
       >
@@ -142,7 +148,9 @@ export const SearchRecentSection = React.memo(function SearchRecentSection({
           ) : null}
         </View>
         <Pressable
-          hitSlop={10}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${item.label} from recent searches`}
           style={styles.recentActionBtn}
           onPress={(e) => { e.stopPropagation(); onRemoveRecentSearch(item.id); }}
         >
@@ -168,7 +176,7 @@ export const SearchRecentSection = React.memo(function SearchRecentSection({
       keyExtractor={(item) => item.id}
       ListHeaderComponent={<Text style={styles.recentTitle}>Recent searches</Text>}
       ListFooterComponent={recentSearches.length ? (
-        <Pressable accessibilityRole="button" style={styles.recentRow} onPress={onClearRecentSearches}>
+        <Pressable accessibilityRole="button" accessibilityLabel="Clear recent searches" style={styles.recentRow} onPress={onClearRecentSearches}>
           <Text style={styles.recentLabel}>Clear recent searches</Text>
         </Pressable>
       ) : undefined}
